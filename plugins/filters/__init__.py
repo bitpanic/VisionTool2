@@ -1,0 +1,3 @@
+"""
+VisionTool filter plugins package.
+""" 

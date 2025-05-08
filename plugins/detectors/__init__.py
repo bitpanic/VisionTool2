@@ -1,0 +1,3 @@
+"""
+VisionTool detector plugins package.
+""" 
