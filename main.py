@@ -1,7 +1,7 @@
 import sys
 import json
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QDockWidget, QWidget, QVBoxLayout,
-                            QMenuBar, QMenu, QAction, QFileDialog, QMessageBox)
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QDockWidget, QWidget, QVBoxLayout, QHBoxLayout,
+                            QMenuBar, QMenu, QAction, QFileDialog, QMessageBox, QSplitter)
 from PyQt5.QtCore import Qt
 from image_viewer import ImageViewer
 from plugin_manager import PluginManager
@@ -15,14 +15,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("VisionTool")
         self.setGeometry(100, 100, 1200, 800)
 
-        # Create central widget and layout
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
-
-        # Create image viewer
+        # Central image viewer
         self.image_viewer = ImageViewer()
-        layout.addWidget(self.image_viewer)
+        central_widget = QWidget()
+        central_layout = QVBoxLayout(central_widget)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.addWidget(self.image_viewer)
+        self.setCentralWidget(central_widget)
 
         # Create ROI manager dock
         self.roi_manager = ROIManager(self.image_viewer)
@@ -32,23 +31,20 @@ class MainWindow(QMainWindow):
         roi_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.addDockWidget(Qt.LeftDockWidgetArea, roi_dock)
 
-        # Create plugin manager dock
+        # Remove right-side tabbing, use a composite widget for right dock
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(4)
         self.plugin_manager = PluginManager()
-        plugin_dock = QDockWidget("Plugins", self)
-        plugin_dock.setWidget(self.plugin_manager)
-        plugin_dock.setAllowedAreas(Qt.RightDockWidgetArea)
-        plugin_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
-        self.addDockWidget(Qt.RightDockWidgetArea, plugin_dock)
-
-        # Create processing pipeline dock
-        self.processing_pipeline = ProcessingPipeline()
-        pipeline_dock = QDockWidget("Processing Pipeline", self)
-        pipeline_dock.setWidget(self.processing_pipeline)
-        pipeline_dock.setAllowedAreas(Qt.RightDockWidgetArea)
-        pipeline_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
-        self.addDockWidget(Qt.RightDockWidgetArea, pipeline_dock)
-        self.tabifyDockWidget(plugin_dock, pipeline_dock)
-        plugin_dock.raise_()
+        self.processing_pipeline = ProcessingPipeline(self.image_viewer)
+        right_layout.addWidget(self.plugin_manager, stretch=2)
+        right_layout.addWidget(self.processing_pipeline, stretch=1)
+        right_dock = QDockWidget("", self)
+        right_dock.setWidget(right_widget)
+        right_dock.setAllowedAreas(Qt.RightDockWidgetArea)
+        right_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        self.addDockWidget(Qt.RightDockWidgetArea, right_dock)
 
         # Create parameter panel dock
         self.parameter_panel = ParameterPanel()

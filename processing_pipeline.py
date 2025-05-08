@@ -9,8 +9,9 @@ class ProcessingPipeline(QWidget):
     plugin_added = pyqtSignal(object)
     plugin_selected = pyqtSignal(object)
 
-    def __init__(self):
+    def __init__(self, image_viewer):
         super().__init__()
+        self.image_viewer = image_viewer
         self.init_ui()
         self.pipeline = []
 
@@ -102,7 +103,7 @@ class ProcessingPipeline(QWidget):
             return image
 
         # Get ROI from image viewer
-        roi = self.parent().parent().image_viewer.get_roi()
+        roi = self.image_viewer.get_roi()
         
         if roi is None:
             # If no ROI, process entire image
