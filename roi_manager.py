@@ -84,6 +84,7 @@ class ROIManager(QWidget):
         height = self.height_spin.value()
         
         self.roi = (x, y, width, height)
+        self.image_viewer.set_roi(self.roi)
         self.roi_changed.emit(self.roi)
 
     def clear_roi(self):
@@ -93,12 +94,14 @@ class ROIManager(QWidget):
         self.y_spin.setValue(0)
         self.width_spin.setValue(1)
         self.height_spin.setValue(1)
+        self.image_viewer.set_roi(None)
         self.roi_changed.emit(None)
 
     def apply_roi(self):
-        """Apply the current ROI to the image viewer"""
+        """Apply the current ROI to the image viewer and trigger pipeline update"""
         if self.roi is not None:
             self.image_viewer.set_roi(self.roi)
+            self.roi_changed.emit(self.roi)
 
     def get_roi(self):
         """Get the current ROI"""
@@ -115,5 +118,7 @@ class ROIManager(QWidget):
             self.width_spin.setValue(width)
             self.height_spin.setValue(height)
             self.roi = roi
+            self.image_viewer.set_roi(self.roi)
+            self.roi_changed.emit(self.roi)
         else:
             self.clear_roi() 

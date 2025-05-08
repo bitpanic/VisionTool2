@@ -67,6 +67,7 @@ class MainWindow(QMainWindow):
         self.processing_pipeline.pipeline_updated.connect(self.image_viewer.update_image)
         self.parameter_panel.parameter_changed.connect(self.on_parameter_changed)
         self.processing_pipeline.plugin_selected.connect(self.parameter_panel.set_plugin)
+        self.roi_manager.roi_changed.connect(self.on_roi_changed)
 
         self.restore_session()
 
@@ -120,9 +121,9 @@ class MainWindow(QMainWindow):
             if self.image_viewer.load_image(file_name):
                 self.setWindowTitle(f"VisionTool - {file_name}")
                 self.last_image_path = file_name
-                # Auto-set ROI in center
                 img = self.image_viewer.get_current_image()
                 if img is not None:
+                    self.processing_pipeline.set_original_image(img)  # Ensure pipeline has the original image
                     h, w = img.shape[:2]
                     roi_w = w // 4
                     roi_h = h // 4
@@ -179,6 +180,20 @@ class MainWindow(QMainWindow):
             self.processing_pipeline.run_pipeline(self.image_viewer.get_current_image())
         self.save_session()
 
+    def on_roi_changed(self, roi):
+        """Handle ROI changes by updating the image viewer and running the pipeline"""
+        # First update the image viewer
+        self.image_viewer.set_roi(roi)
+        # Force a repaint of the image viewer
+        self.image_viewer.repaint()
+        # Then run the pipeline with the original image
+        if self.image_viewer.get_current_image() is not None:
+            # Get the original image from the pipeline
+            original_image = self.image_viewer.get_current_image()
+            # Run pipeline with original image
+            self.processing_pipeline.run_pipeline(original_image)
+        self.save_session()
+
     def save_session(self):
         session = {
             'image_path': self.last_image_path,
@@ -207,6 +222,9 @@ class MainWindow(QMainWindow):
             if image_path and os.path.exists(image_path):
                 self.image_viewer.load_image(image_path)
                 self.last_image_path = image_path
+                img = self.image_viewer.get_current_image()
+                if img is not None:
+                    self.processing_pipeline.set_original_image(img)  # Ensure pipeline has the original image
             # Restore ROI
             roi = session.get('roi')
             if roi:

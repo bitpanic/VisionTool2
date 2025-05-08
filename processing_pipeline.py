@@ -14,6 +14,7 @@ class ProcessingPipeline(QWidget):
         self.image_viewer = image_viewer
         self.init_ui()
         self.pipeline = []
+        self.original_image = None  # Store the original image
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -38,6 +39,10 @@ class ProcessingPipeline(QWidget):
         self.remove_btn.clicked.connect(self.remove_plugin)
         button_layout.addWidget(self.remove_btn)
         
+        self.reset_btn = QPushButton("Reset")
+        self.reset_btn.clicked.connect(self.reset_pipeline)
+        button_layout.addWidget(self.reset_btn)
+        
         layout.addLayout(button_layout)
 
         # Create save/load buttons
@@ -59,6 +64,9 @@ class ProcessingPipeline(QWidget):
         item = QListWidgetItem(plugin.get_name())
         self.pipeline_list.addItem(item)
         self.plugin_added.emit(plugin)
+        # Run pipeline to update the image
+        if self.image_viewer.get_current_image() is not None:
+            self.run_pipeline(self.image_viewer.get_current_image())
 
     def remove_plugin(self):
         """Remove the selected plugin from the pipeline"""
@@ -66,6 +74,9 @@ class ProcessingPipeline(QWidget):
         if current_row >= 0:
             self.pipeline_list.takeItem(current_row)
             self.pipeline.pop(current_row)
+            # Run pipeline to update the image
+            if self.image_viewer.get_current_image() is not None:
+                self.run_pipeline(self.image_viewer.get_current_image())
 
     def move_up(self):
         """Move the selected plugin up in the pipeline"""
@@ -79,6 +90,10 @@ class ProcessingPipeline(QWidget):
             # Move in pipeline list
             self.pipeline[current_row], self.pipeline[current_row - 1] = \
                 self.pipeline[current_row - 1], self.pipeline[current_row]
+            
+            # Run pipeline to update the image
+            if self.image_viewer.get_current_image() is not None:
+                self.run_pipeline(self.image_viewer.get_current_image())
 
     def move_down(self):
         """Move the selected plugin down in the pipeline"""
@@ -92,30 +107,42 @@ class ProcessingPipeline(QWidget):
             # Move in pipeline list
             self.pipeline[current_row], self.pipeline[current_row + 1] = \
                 self.pipeline[current_row + 1], self.pipeline[current_row]
+            
+            # Run pipeline to update the image
+            if self.image_viewer.get_current_image() is not None:
+                self.run_pipeline(self.image_viewer.get_current_image())
+
+    def set_original_image(self, image):
+        """Explicitly set the original image (should be called when loading a new image)"""
+        if image is not None:
+            self.original_image = image.copy()
 
     def run_pipeline(self, image=None):
         """Run the pipeline on the input image"""
-        if not self.pipeline or image is None:
-            return image
+        # Do not set self.original_image here!
+        if self.original_image is None:
+            return None
+
+        # If no pipeline, return original image
+        if not self.pipeline:
+            self.pipeline_updated.emit(self.original_image.copy())
+            return self.original_image.copy()
 
         roi = self.image_viewer.get_roi()
         # Ensure ROI is a tuple of 4 ints
         if isinstance(roi, tuple) and len(roi) == 4 and all(isinstance(v, int) for v in roi):
             x, y, w, h = roi
-            roi_image = image[y:y+h, x:x+w].copy()
+            roi_image = self.original_image[y:y+h, x:x+w].copy()
             result = roi_image.copy()
             for plugin in self.pipeline:
                 if result is not None:
                     result = plugin.process(result)
-            output = image.copy()
+            output = self.original_image.copy()
             output[y:y+h, x:x+w] = result
             result = output
         else:
-            # No valid ROI, process entire image
-            result = image.copy()
-            for plugin in self.pipeline:
-                if result is not None:
-                    result = plugin.process(result)
+            # No valid ROI, show original image (do not process)
+            result = self.original_image.copy()
 
         if result is not None:
             self.pipeline_updated.emit(result)
@@ -125,10 +152,18 @@ class ProcessingPipeline(QWidget):
         """Get the current pipeline"""
         return self.pipeline.copy()
 
+    def reset_pipeline(self):
+        """Reset the pipeline by showing the original image"""
+        if self.original_image is not None:
+            self.pipeline_updated.emit(self.original_image.copy())
+
     def clear_pipeline(self):
         """Clear the pipeline"""
         self.pipeline.clear()
         self.pipeline_list.clear()
+        # Run pipeline to update the image
+        if self.image_viewer.get_current_image() is not None:
+            self.run_pipeline(self.image_viewer.get_current_image())
 
     def save_pipeline(self):
         """Save the current pipeline to a JSON file"""
@@ -173,6 +208,10 @@ class ProcessingPipeline(QWidget):
             # Add plugins to pipeline
             for plugin_data in pipeline_data:
                 self.plugin_added.emit(plugin_data)
+            
+            # Run pipeline to update the image
+            if self.image_viewer.get_current_image() is not None:
+                self.run_pipeline(self.image_viewer.get_current_image())
 
     def on_plugin_selected(self, current, previous):
         """Handle plugin selection in the pipeline list"""

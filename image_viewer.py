@@ -136,8 +136,9 @@ class ImageViewer(QWidget):
     def set_roi(self, roi):
         """Set the Region of Interest"""
         self.roi = roi
-        if self.display_image_data is not None:
-            self.display_image(self.display_image_data)
+        if self.current_image is not None:
+            self.display_image(self.current_image)
+            self.repaint()  # Force immediate repaint
 
     def get_roi(self):
         """Get the current Region of Interest"""
