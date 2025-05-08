@@ -28,29 +28,37 @@ class MainWindow(QMainWindow):
         self.roi_manager = ROIManager(self.image_viewer)
         roi_dock = QDockWidget("ROI Controls", self)
         roi_dock.setWidget(self.roi_manager)
-        roi_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        roi_dock.setAllowedAreas(Qt.LeftDockWidgetArea)
+        roi_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.addDockWidget(Qt.LeftDockWidgetArea, roi_dock)
 
         # Create plugin manager dock
         self.plugin_manager = PluginManager()
         plugin_dock = QDockWidget("Plugins", self)
         plugin_dock.setWidget(self.plugin_manager)
-        plugin_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        plugin_dock.setAllowedAreas(Qt.RightDockWidgetArea)
+        plugin_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.addDockWidget(Qt.RightDockWidgetArea, plugin_dock)
 
         # Create processing pipeline dock
         self.processing_pipeline = ProcessingPipeline()
         pipeline_dock = QDockWidget("Processing Pipeline", self)
         pipeline_dock.setWidget(self.processing_pipeline)
-        pipeline_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        pipeline_dock.setAllowedAreas(Qt.RightDockWidgetArea)
+        pipeline_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.addDockWidget(Qt.RightDockWidgetArea, pipeline_dock)
+        self.tabifyDockWidget(plugin_dock, pipeline_dock)
+        plugin_dock.raise_()
 
         # Create parameter panel dock
         self.parameter_panel = ParameterPanel()
         param_dock = QDockWidget("Parameters", self)
         param_dock.setWidget(self.parameter_panel)
-        param_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        self.addDockWidget(Qt.RightDockWidgetArea, param_dock)
+        param_dock.setAllowedAreas(Qt.LeftDockWidgetArea)
+        param_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        self.addDockWidget(Qt.LeftDockWidgetArea, param_dock)
+        self.tabifyDockWidget(roi_dock, param_dock)
+        roi_dock.raise_()
 
         # Create menu bar
         self.create_menu_bar()
@@ -99,7 +107,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(exit_action)
 
     def load_image(self):
-        """Open file dialog to load an image"""
+        """Open file dialog to load an image and auto-set ROI"""
         file_name, _ = QFileDialog.getOpenFileName(
             self,
             "Open Image File",
@@ -110,6 +118,17 @@ class MainWindow(QMainWindow):
         if file_name:
             if self.image_viewer.load_image(file_name):
                 self.setWindowTitle(f"VisionTool - {file_name}")
+                # Auto-set ROI in center
+                img = self.image_viewer.get_current_image()
+                if img is not None:
+                    h, w = img.shape[:2]
+                    roi_w = w // 4
+                    roi_h = h // 4
+                    roi_x = (w - roi_w) // 2
+                    roi_y = (h - roi_h) // 2
+                    roi = (roi_x, roi_y, roi_w, roi_h)
+                    self.roi_manager.set_roi(roi)
+                    self.image_viewer.set_roi(roi)
             else:
                 QMessageBox.warning(self, "Error", f"Failed to load image: {file_name}")
 
