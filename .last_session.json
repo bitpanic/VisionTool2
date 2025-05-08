@@ -1,0 +1,33 @@
+{
+  "image_path": "/Users/panic/Downloads/input.png",
+  "roi": [
+    1680,
+    1689,
+    1120,
+    1126
+  ],
+  "pipeline": [
+    {
+      "name": "Blob Detector",
+      "parameters": {
+        "min_threshold": 18,
+        "max_threshold": 200,
+        "threshold_step": 10,
+        "min_area": 100,
+        "max_area": 5000,
+        "min_circularity": 0.1,
+        "min_convexity": 2.87,
+        "max_convexity": 1.0,
+        "min_inertia_ratio": 0.01
+      }
+    },
+    {
+      "name": "Contrast Enhancement",
+      "parameters": {
+        "clip_limit": 25.0,
+        "tile_size": 12,
+        "apply_clahe": true
+      }
+    }
+  ]
+}
