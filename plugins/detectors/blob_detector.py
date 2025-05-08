@@ -15,6 +15,7 @@ class BlobDetector(DetectorPlugin):
             "max_area": 5000,
             "min_circularity": 0.1,
             "min_convexity": 0.87,
+            "max_convexity": 1.0,
             "min_inertia_ratio": 0.01
         }
 
@@ -48,7 +49,10 @@ class BlobDetector(DetectorPlugin):
         
         # Filter by Convexity
         params.filterByConvexity = True
-        params.minConvexity = self.parameters["min_convexity"]
+        min_conv = max(0.01, min(float(self.parameters.get("min_convexity", 0.01)), 1.0))
+        max_conv = max(min_conv, min(float(self.parameters.get("max_convexity", 1.0)), 1.0))
+        params.minConvexity = min_conv
+        params.maxConvexity = max_conv
         
         # Filter by Inertia
         params.filterByInertia = True

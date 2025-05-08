@@ -23,43 +23,42 @@ class MainWindow(QMainWindow):
         central_layout.addWidget(self.image_viewer)
         self.setCentralWidget(central_widget)
 
-        # Create ROI manager dock
-        self.roi_manager = ROIManager(self.image_viewer)
-        roi_dock = QDockWidget("ROI Controls", self)
-        roi_dock.setWidget(self.roi_manager)
-        roi_dock.setAllowedAreas(Qt.LeftDockWidgetArea)
-        roi_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
-        self.addDockWidget(Qt.LeftDockWidgetArea, roi_dock)
+        # Left: Only Parameters panel
+        self.parameter_panel = ParameterPanel()
+        left_dock = QDockWidget("Parameters", self)
+        left_dock.setWidget(self.parameter_panel)
+        left_dock.setAllowedAreas(Qt.LeftDockWidgetArea)
+        left_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        self.addDockWidget(Qt.LeftDockWidgetArea, left_dock)
 
-        # Remove right-side tabbing, use a composite widget for right dock
+        # Right: ROI controls (top), Plugins (middle), Pipeline (bottom)
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(4)
+        self.roi_manager = ROIManager(self.image_viewer)
         self.plugin_manager = PluginManager()
         self.processing_pipeline = ProcessingPipeline(self.image_viewer)
-        right_layout.addWidget(self.plugin_manager, stretch=2)
-        right_layout.addWidget(self.processing_pipeline, stretch=1)
+        self.roi_manager.setMinimumHeight(120)
+        self.plugin_manager.setMinimumHeight(180)
+        self.processing_pipeline.setMinimumHeight(180)
+        right_layout.addWidget(self.roi_manager)
+        right_layout.addWidget(self.plugin_manager)
+        right_layout.addWidget(self.processing_pipeline)
+        right_layout.setStretch(0, 1)
+        right_layout.setStretch(1, 2)
+        right_layout.setStretch(2, 2)
         right_dock = QDockWidget("", self)
         right_dock.setWidget(right_widget)
         right_dock.setAllowedAreas(Qt.RightDockWidgetArea)
         right_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.addDockWidget(Qt.RightDockWidgetArea, right_dock)
 
-        # Create parameter panel dock
-        self.parameter_panel = ParameterPanel()
-        param_dock = QDockWidget("Parameters", self)
-        param_dock.setWidget(self.parameter_panel)
-        param_dock.setAllowedAreas(Qt.LeftDockWidgetArea)
-        param_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
-        self.addDockWidget(Qt.LeftDockWidgetArea, param_dock)
-        self.tabifyDockWidget(roi_dock, param_dock)
-        roi_dock.raise_()
-
         # Create menu bar
         self.create_menu_bar()
 
         # Connect signals
+        self.image_viewer.load_image_requested.connect(self.load_image)
         self.plugin_manager.plugin_selected.connect(self.on_plugin_selected)
         self.processing_pipeline.pipeline_updated.connect(self.image_viewer.update_image)
         self.parameter_panel.parameter_changed.connect(self.on_parameter_changed)

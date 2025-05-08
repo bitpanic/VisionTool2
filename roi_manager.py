@@ -97,16 +97,18 @@ class ROIManager(QWidget):
 
     def apply_roi(self):
         """Apply the current ROI to the image viewer"""
-        if self.roi:
+        if self.roi is not None:
             self.image_viewer.set_roi(self.roi)
 
     def get_roi(self):
         """Get the current ROI"""
-        return self.roi
+        if self.roi and isinstance(self.roi, tuple) and len(self.roi) == 4:
+            return self.roi
+        return None
 
     def set_roi(self, roi):
         """Set the ROI values"""
-        if roi:
+        if roi is not None:
             x, y, width, height = roi
             self.x_spin.setValue(x)
             self.y_spin.setValue(y)

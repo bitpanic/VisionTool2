@@ -38,10 +38,6 @@ class ProcessingPipeline(QWidget):
         self.remove_btn.clicked.connect(self.remove_plugin)
         button_layout.addWidget(self.remove_btn)
         
-        self.run_btn = QPushButton("Run Pipeline")
-        self.run_btn.clicked.connect(self.run_pipeline)
-        button_layout.addWidget(self.run_btn)
-        
         layout.addLayout(button_layout)
 
         # Create save/load buttons
@@ -102,31 +98,25 @@ class ProcessingPipeline(QWidget):
         if not self.pipeline or image is None:
             return image
 
-        # Get ROI from image viewer
         roi = self.image_viewer.get_roi()
-        
-        if roi is None:
-            # If no ROI, process entire image
-            result = image.copy()
-            for plugin in self.pipeline:
-                if result is not None:
-                    result = plugin.process(result)
-        else:
-            # Process only ROI region
+        # Ensure ROI is a tuple of 4 ints
+        if isinstance(roi, tuple) and len(roi) == 4 and all(isinstance(v, int) for v in roi):
             x, y, w, h = roi
             roi_image = image[y:y+h, x:x+w].copy()
-            
-            # Process ROI
             result = roi_image.copy()
             for plugin in self.pipeline:
                 if result is not None:
                     result = plugin.process(result)
-            
-            # Create output image with processed ROI
             output = image.copy()
             output[y:y+h, x:x+w] = result
             result = output
-        
+        else:
+            # No valid ROI, process entire image
+            result = image.copy()
+            for plugin in self.pipeline:
+                if result is not None:
+                    result = plugin.process(result)
+
         if result is not None:
             self.pipeline_updated.emit(result)
         return result

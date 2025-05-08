@@ -1,10 +1,11 @@
 import cv2
 import numpy as np
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea, QHBoxLayout, QPushButton
-from PyQt5.QtCore import Qt, QSize, QPoint
+from PyQt5.QtCore import Qt, QSize, QPoint, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap, QCursor, QPainter, QPen, QColor
 
 class ImageViewer(QWidget):
+    load_image_requested = pyqtSignal()
     def __init__(self):
         super().__init__()
         self.init_ui()
@@ -18,8 +19,12 @@ class ImageViewer(QWidget):
     def init_ui(self):
         layout = QVBoxLayout(self)
         
-        # Create toolbar with zoom buttons
+        # Create toolbar with load and zoom buttons
         toolbar = QHBoxLayout()
+        
+        self.load_image_btn = QPushButton("Load Image")
+        self.load_image_btn.clicked.connect(self.load_image_requested.emit)
+        toolbar.addWidget(self.load_image_btn)
         
         self.zoom_in_btn = QPushButton("Zoom In")
         self.zoom_in_btn.clicked.connect(lambda: self.zoom(1.25))
