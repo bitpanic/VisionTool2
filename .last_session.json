@@ -8,17 +8,9 @@
   ],
   "pipeline": [
     {
-      "name": "Blob Detector",
+      "name": "Gaussian Blur",
       "parameters": {
-        "min_threshold": 10,
-        "max_threshold": 200,
-        "threshold_step": 10,
-        "min_area": 10,
-        "max_area": 5000,
-        "min_circularity": 0.1,
-        "min_convexity": 0.87,
-        "max_convexity": 1.0,
-        "min_inertia_ratio": 0.01
+        "kernel_size": 25
       }
     }
   ]
