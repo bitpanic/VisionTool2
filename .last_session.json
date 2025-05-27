@@ -1,10 +1,26 @@
 {
-  "image_path": "C:/Users/Sebastian/Desktop/b3_Percent inspection 1_i042_c42_f001_db34348.jpg",
+  "image_path": "C:/Users/Sebastian/Desktop/glass1.jpg",
   "roi": [
     1680,
     1689,
     1120,
     1126
   ],
-  "pipeline": []
+  "pipeline": [
+    {
+      "name": "Contrast Enhancement",
+      "parameters": {
+        "clip_limit": 2.0,
+        "tile_size": 8,
+        "apply_clahe": true
+      }
+    },
+    {
+      "name": "Edge Detection",
+      "parameters": {
+        "threshold1": 100,
+        "threshold2": 200
+      }
+    }
+  ]
 }

@@ -87,14 +87,6 @@ class ImageViewer(QWidget):
         scaled_w = int(w * self.scale_factor)
         scaled_h = int(h * self.scale_factor)
         
-        # Get scroll position
-        scroll_x = self.scroll_area.horizontalScrollBar().value()
-        scroll_y = self.scroll_area.verticalScrollBar().value()
-        
-        # Adjust for scroll position
-        scaled_x -= scroll_x
-        scaled_y -= scroll_y
-        
         if handle == 'top_left':
             return QRect(scaled_x - self.handle_size//2, scaled_y - self.handle_size//2, 
                         self.handle_size, self.handle_size)
@@ -130,9 +122,16 @@ class ImageViewer(QWidget):
         handles = ['top_left', 'top', 'top_right', 'right', 'bottom_right', 
                   'bottom', 'bottom_left', 'left']
         
+        # Get scroll position
+        scroll_x = self.scroll_area.horizontalScrollBar().value()
+        scroll_y = self.scroll_area.verticalScrollBar().value()
+        
+        # Adjust mouse position for scroll
+        adjusted_pos = QPoint(pos.x() + scroll_x, pos.y() + scroll_y)
+        
         for handle in handles:
             rect = self.get_handle_rect(x, y, w, h, handle)
-            if rect and rect.contains(pos):
+            if rect and rect.contains(adjusted_pos):
                 return handle
                 
         # Check if point is inside ROI (for moving)
@@ -141,16 +140,8 @@ class ImageViewer(QWidget):
         scaled_w = int(w * self.scale_factor)
         scaled_h = int(h * self.scale_factor)
         
-        # Get scroll position
-        scroll_x = self.scroll_area.horizontalScrollBar().value()
-        scroll_y = self.scroll_area.verticalScrollBar().value()
-        
-        # Adjust for scroll position
-        scaled_x -= scroll_x
-        scaled_y -= scroll_y
-        
         roi_rect = QRect(scaled_x, scaled_y, scaled_w, scaled_h)
-        if roi_rect.contains(pos):
+        if roi_rect.contains(adjusted_pos):
             return 'move'
             
         return None
@@ -222,12 +213,6 @@ class ImageViewer(QWidget):
             scaled_y = int(y * self.scale_factor)
             scaled_w = int(w * self.scale_factor)
             scaled_h = int(h * self.scale_factor)
-
-            # Get scroll position
-            scroll_x = self.scroll_area.horizontalScrollBar().value()
-            scroll_y = self.scroll_area.verticalScrollBar().value()
-            scaled_x -= scroll_x
-            scaled_y -= scroll_y
             
             # Draw semi-transparent overlay
             painter.setBrush(QColor(255, 0, 0, 30))  # Semi-transparent red
