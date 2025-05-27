@@ -1,14 +1,21 @@
 import sys
 import json
 import os
+print("Starting application...")
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QDockWidget, QWidget, QVBoxLayout, QHBoxLayout,
                             QMenuBar, QMenu, QAction, QFileDialog, QMessageBox, QSplitter)
+print("PyQt5 imported successfully")
 from PyQt5.QtCore import Qt
 from image_viewer import ImageViewer
+print("ImageViewer imported")
 from plugin_manager import PluginManager
+print("PluginManager imported")
 from processing_pipeline import ProcessingPipeline
+print("ProcessingPipeline imported")
 from parameter_panel import ParameterPanel
+print("ParameterPanel imported")
 from roi_manager import ROIManager
+print("ROIManager imported")
 
 SESSION_FILE = os.path.join(os.path.dirname(__file__), '.last_session.json')
 
@@ -243,10 +250,15 @@ class MainWindow(QMainWindow):
             print(f"Failed to restore session: {e}")
 
 def main():
+    print("Entering main function")
     app = QApplication(sys.argv)
+    print("QApplication created")
     window = MainWindow()
+    print("MainWindow created")
     window.show()
+    print("Window shown")
     sys.exit(app.exec_())
+    print("Application exited")
 
 if __name__ == "__main__":
     main() 
