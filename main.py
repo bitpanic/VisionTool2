@@ -16,6 +16,7 @@ from parameter_panel import ParameterPanel
 print("ParameterPanel imported")
 from roi_manager import ROIManager
 print("ROIManager imported")
+from histogram_widget import HistogramWidget
 
 SESSION_FILE = os.path.join(os.path.dirname(__file__), '.last_session.json')
 
@@ -31,34 +32,42 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         central_layout = QVBoxLayout(central_widget)
         central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.addWidget(self.image_viewer)
         self.setCentralWidget(central_widget)
 
-        # Left: Only Parameters panel
+        # Left: Only Parameters panel (fixed width)
         self.parameter_panel = ParameterPanel()
         left_dock = QDockWidget("Parameters", self)
         left_dock.setWidget(self.parameter_panel)
         left_dock.setAllowedAreas(Qt.LeftDockWidgetArea)
         left_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        fixed_width = 260
+        left_dock.setMinimumWidth(fixed_width)
+        left_dock.setMaximumWidth(fixed_width)
         self.addDockWidget(Qt.LeftDockWidgetArea, left_dock)
 
-        # Right: ROI controls (top), Plugins (middle), Pipeline (bottom)
+        # Right: ROI controls, Histogram, Plugins, Pipeline
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(4)
         self.roi_manager = ROIManager(self.image_viewer)
+        self.histogram_widget = HistogramWidget()
         self.plugin_manager = PluginManager()
         self.processing_pipeline = ProcessingPipeline(self.image_viewer)
         self.roi_manager.setMinimumHeight(120)
+        self.histogram_widget.setMinimumHeight(140)
         self.plugin_manager.setMinimumHeight(180)
         self.processing_pipeline.setMinimumHeight(180)
         right_layout.addWidget(self.roi_manager)
+        right_layout.addWidget(self.histogram_widget)
         right_layout.addWidget(self.plugin_manager)
         right_layout.addWidget(self.processing_pipeline)
         right_layout.setStretch(0, 1)
-        right_layout.setStretch(1, 2)
+        right_layout.setStretch(1, 1)
         right_layout.setStretch(2, 2)
+        right_layout.setStretch(3, 2)
         right_dock = QDockWidget("", self)
         right_dock.setWidget(right_widget)
         right_dock.setAllowedAreas(Qt.RightDockWidgetArea)
@@ -70,11 +79,14 @@ class MainWindow(QMainWindow):
 
         # Connect signals
         self.image_viewer.load_image_requested.connect(self.load_image)
+        self.image_viewer.roi_changed.connect(self.roi_manager.set_roi)
         self.plugin_manager.plugin_selected.connect(self.on_plugin_selected)
         self.processing_pipeline.pipeline_updated.connect(self.image_viewer.update_image)
+        self.processing_pipeline.pipeline_updated.connect(self.histogram_widget.set_image)
         self.parameter_panel.parameter_changed.connect(self.on_parameter_changed)
         self.processing_pipeline.plugin_selected.connect(self.parameter_panel.set_plugin)
         self.roi_manager.roi_changed.connect(self.on_roi_changed)
+        self.histogram_widget.lut_changed.connect(self.on_lut_changed)
 
         self.restore_session()
 
@@ -105,6 +117,15 @@ class MainWindow(QMainWindow):
         load_pipeline_action.setShortcut('Ctrl+L')
         load_pipeline_action.triggered.connect(self.load_pipeline)
         file_menu.addAction(load_pipeline_action)
+
+        # Add separator
+        file_menu.addSeparator()
+
+        # Add Export View action
+        export_view_action = QAction('Export View', self)
+        export_view_action.setShortcut('Ctrl+E')
+        export_view_action.triggered.connect(self.export_view_with_annotations)
+        file_menu.addAction(export_view_action)
         
         # Add separator
         file_menu.addSeparator()
@@ -114,6 +135,22 @@ class MainWindow(QMainWindow):
         exit_action.setShortcut('Ctrl+Q')
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+    def export_view_with_annotations(self):
+        """Export the current viewer pixmap (including ROI and measurements) as an image."""
+        pixmap = self.image_viewer.image_label.pixmap()
+        if pixmap is None:
+            return
+
+        file_name, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export View",
+            "",
+            "PNG Image (*.png);;JPEG Image (*.jpg *.jpeg)"
+        )
+
+        if file_name:
+            pixmap.save(file_name)
 
     def load_image(self):
         """Open file dialog to load an image and auto-set ROI"""
@@ -131,6 +168,7 @@ class MainWindow(QMainWindow):
                 img = self.image_viewer.get_current_image()
                 if img is not None:
                     self.processing_pipeline.set_original_image(img)  # Ensure pipeline has the original image
+                    self.histogram_widget.set_image(img)
                     h, w = img.shape[:2]
                     roi_w = w // 4
                     roi_h = h // 4
@@ -186,6 +224,10 @@ class MainWindow(QMainWindow):
         if self.image_viewer.get_current_image() is not None:
             self.processing_pipeline.run_pipeline(self.image_viewer.get_current_image())
         self.save_session()
+
+    def on_lut_changed(self, low, high):
+        """Update viewer LUT from histogram widget."""
+        self.image_viewer.set_lut(low, high)
 
     def on_roi_changed(self, roi):
         """Handle ROI changes by updating the image viewer and running the pipeline"""

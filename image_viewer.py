@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea, QHBoxLayout, QPushButton
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea, QHBoxLayout, QPushButton, QDoubleSpinBox, QComboBox, QApplication
 from PyQt5.QtCore import Qt, QSize, QPoint, pyqtSignal, QRect
 from PyQt5.QtGui import QImage, QPixmap, QCursor, QPainter, QPen, QColor
 
@@ -18,11 +18,21 @@ class ImageViewer(QWidget):
         self.last_pos = None
         self.display_image_data = None
         self.resize_handle = None  # Current resize handle being dragged
-        self.resize_start = None   # Starting position for resize
+        self.resize_start = None   # Starting position for resize (label coords)
         self.resize_start_roi = None  # ROI at start of resize
+        self.resize_start_img = None  # Mouse position in image coords at start of resize/move
         self.handle_size = 8  # Size of resize handles in pixels
         self.new_roi_start = None  # Starting point for new ROI creation
-        self.is_ctrl_pressed = False  # Track Ctrl key state
+        # Calibration, measurement, and LUT
+        self.pixel_size = 1.0  # physical units per pixel
+        self.pixel_unit = "px"
+        self.measure_mode = False
+        self.measure_start = None  # (x, y) in image coords
+        self.measure_temp_end = None  # (x, y) in image coords for live preview
+        self.measurements = []  # list of (x1, y1, x2, y2, length_px, length_phys, unit)
+        self.lut_enabled = False
+        self.lut_low = 0
+        self.lut_high = 255
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -49,6 +59,32 @@ class ImageViewer(QWidget):
         self.zoom_roi_btn = QPushButton("Zoom to ROI")
         self.zoom_roi_btn.clicked.connect(self.zoom_to_roi)
         toolbar.addWidget(self.zoom_roi_btn)
+
+        # Measurement mode toggle
+        self.measure_btn = QPushButton("Measure")
+        self.measure_btn.setCheckable(True)
+        self.measure_btn.toggled.connect(self.set_measure_mode)
+        toolbar.addWidget(self.measure_btn)
+
+        # Clear measurements
+        self.clear_measure_btn = QPushButton("Clear Measurements")
+        self.clear_measure_btn.clicked.connect(self.clear_measurements)
+        toolbar.addWidget(self.clear_measure_btn)
+
+        # Calibration controls
+        self.pixel_size_spin = QDoubleSpinBox()
+        self.pixel_size_spin.setRange(0.0001, 1e9)
+        self.pixel_size_spin.setDecimals(4)
+        self.pixel_size_spin.setValue(1.0)
+        self.pixel_size_spin.valueChanged.connect(self.on_calibration_changed)
+        toolbar.addWidget(QLabel("Units / pixel:"))
+        toolbar.addWidget(self.pixel_size_spin)
+
+        self.unit_combo = QComboBox()
+        self.unit_combo.addItems(["px", "µm", "mm"])
+        self.unit_combo.setCurrentText("px")
+        self.unit_combo.currentTextChanged.connect(self.on_calibration_changed)
+        toolbar.addWidget(self.unit_combo)
         
         toolbar.addStretch()
         layout.addLayout(toolbar)
@@ -114,68 +150,104 @@ class ImageViewer(QWidget):
         return None
 
     def get_handle_at_pos(self, pos):
-        """Get the resize handle at the given position"""
+        """Get the resize handle at the given position (label coordinates)."""
         if self.roi is None:
             return None
-            
+
         x, y, w, h = self.roi
-        handles = ['top_left', 'top', 'top_right', 'right', 'bottom_right', 
-                  'bottom', 'bottom_left', 'left']
-        
-        # Get scroll position
-        scroll_x = self.scroll_area.horizontalScrollBar().value()
-        scroll_y = self.scroll_area.verticalScrollBar().value()
-        
-        # Adjust mouse position for scroll
-        adjusted_pos = QPoint(pos.x() + scroll_x, pos.y() + scroll_y)
-        
+        handles = ['top_left', 'top', 'top_right', 'right', 'bottom_right',
+                   'bottom', 'bottom_left', 'left']
+
+        # Adjust mouse position for margins (centering)
+        margin_x, margin_y = self._get_image_margins()
+        adjusted_pos = QPoint(pos.x() - margin_x, pos.y() - margin_y)
+
         for handle in handles:
             rect = self.get_handle_rect(x, y, w, h, handle)
             if rect and rect.contains(adjusted_pos):
                 return handle
-                
+
         # Check if point is inside ROI (for moving)
         scaled_x = int(x * self.scale_factor)
         scaled_y = int(y * self.scale_factor)
         scaled_w = int(w * self.scale_factor)
         scaled_h = int(h * self.scale_factor)
-        
+
         roi_rect = QRect(scaled_x, scaled_y, scaled_w, scaled_h)
         if roi_rect.contains(adjusted_pos):
             return 'move'
-            
+
         return None
 
+    def _get_scaled_image_size(self):
+        """Return the current scaled image width and height."""
+        if self.current_image is None:
+            return 0, 0
+        img_h, img_w = self.current_image.shape[:2]
+        return img_w * self.scale_factor, img_h * self.scale_factor
+
+    def _get_image_margins(self):
+        """Return horizontal and vertical margins due to centering inside the label."""
+        scaled_w, scaled_h = self._get_scaled_image_size()
+        margin_x = max(0, (self.image_label.width() - scaled_w) / 2)
+        margin_y = max(0, (self.image_label.height() - scaled_h) / 2)
+        return margin_x, margin_y
+
     def map_to_image_coords(self, pos):
-        """Convert widget coordinates to image coordinates"""
+        """Convert label coordinates to image coordinates.
+
+        The incoming `pos` is expected to already be in `image_label` coordinates.
+        Because the pixmap is centered inside the label, we must remove
+        the horizontal/vertical margins before undoing the scaling.
+        """
         if self.current_image is None:
             return None
-            
-        # Get the image label's position in the widget
-        label_pos = self.image_label.mapFrom(self, pos)
-        
-        # Get the scroll area's scroll position
-        scroll_x = self.scroll_area.horizontalScrollBar().value()
-        scroll_y = self.scroll_area.verticalScrollBar().value()
-        
-        # Adjust for scroll position
-        x = label_pos.x() + scroll_x
-        y = label_pos.y() + scroll_y
-        
-        # Convert to image coordinates
-        image_x = x / self.scale_factor
-        image_y = y / self.scale_factor
-        
+
+        # Margins added by centering inside the label
+        margin_x, margin_y = self._get_image_margins()
+
+        # Position relative to the top-left corner of the pixmap
+        rel_x = pos.x() - margin_x
+        rel_y = pos.y() - margin_y
+
+        # Convert to image coordinates by undoing scale
+        image_x = rel_x / self.scale_factor
+        image_y = rel_y / self.scale_factor
+
         # Check if the point is within the image bounds
-        if (0 <= image_x < self.current_image.shape[1] and 
+        if (0 <= image_x < self.current_image.shape[1] and
             0 <= image_y < self.current_image.shape[0]):
             return (image_x, image_y)
         return None
+
+    def apply_lut(self, image):
+        """Apply simple window LUT [lut_low, lut_high] to image."""
+        if not self.lut_enabled or image is None:
+            return image
+        low = max(0, min(255, int(self.lut_low)))
+        high = max(0, min(255, int(self.lut_high)))
+        if high <= low:
+            return image
+        img = image.astype(np.float32)
+        img = (img - low) * (255.0 / float(high - low))
+        img = np.clip(img, 0, 255).astype(np.uint8)
+        return img
+
+    def set_lut(self, low, high):
+        """Set LUT window and refresh display."""
+        self.lut_low = int(low)
+        self.lut_high = int(high)
+        self.lut_enabled = True
+        if self.current_image is not None:
+            self.display_image(self.current_image)
 
     def display_image(self, image):
         """Display the given image"""
         if image is None:
             return
+
+        # Apply LUT before color conversion
+        image = self.apply_lut(image)
 
         # Convert BGR to RGB
         if len(image.shape) == 3:
@@ -198,40 +270,79 @@ class ImageViewer(QWidget):
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation
         )
-        
-        # Draw ROI if exists
-        if self.roi is not None:
+
+        # Draw ROI, measurements and overlays
+        needs_painter = (
+            self.roi is not None
+            or bool(self.measurements)
+            or (self.measure_mode and self.measure_start is not None and self.measure_temp_end is not None)
+        )
+
+        if needs_painter:
             painter = QPainter(scaled_pixmap)
-            
-            # Draw ROI border
-            pen = QPen(QColor(255, 0, 0))  # Red color
-            pen.setWidth(2)
-            painter.setPen(pen)
-            
-            x, y, w, h = self.roi
-            scaled_x = int(x * self.scale_factor)
-            scaled_y = int(y * self.scale_factor)
-            scaled_w = int(w * self.scale_factor)
-            scaled_h = int(h * self.scale_factor)
-            
-            # Draw semi-transparent overlay
-            painter.setBrush(QColor(255, 0, 0, 30))  # Semi-transparent red
-            painter.drawRect(scaled_x, scaled_y, scaled_w, scaled_h)
-            
-            # Draw border
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(scaled_x, scaled_y, scaled_w, scaled_h)
-            
-            # Draw resize handles if Ctrl is pressed
-            if self.is_ctrl_pressed:
-                handles = ['top_left', 'top', 'top_right', 'right', 'bottom_right', 
-                          'bottom', 'bottom_left', 'left']
-                for handle in handles:
-                    rect = self.get_handle_rect(x, y, w, h, handle)
-                    if rect:
-                        painter.setBrush(QColor(255, 255, 255))
-                        painter.drawRect(rect)
-            
+
+            # Draw ROI if exists
+            if self.roi is not None:
+                pen = QPen(QColor(255, 0, 0))  # Red color
+                pen.setWidth(2)
+                painter.setPen(pen)
+
+                x, y, w, h = self.roi
+                scaled_x = int(x * self.scale_factor)
+                scaled_y = int(y * self.scale_factor)
+                scaled_w = int(w * self.scale_factor)
+                scaled_h = int(h * self.scale_factor)
+
+                # Draw semi-transparent overlay
+                painter.setBrush(QColor(255, 0, 0, 30))  # Semi-transparent red
+                painter.drawRect(scaled_x, scaled_y, scaled_w, scaled_h)
+
+                # Draw border
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(scaled_x, scaled_y, scaled_w, scaled_h)
+
+                # Draw resize handles when Ctrl is held
+                if QApplication.keyboardModifiers() & Qt.ControlModifier:
+                    handles = ['top_left', 'top', 'top_right', 'right', 'bottom_right',
+                               'bottom', 'bottom_left', 'left']
+                    for handle in handles:
+                        rect = self.get_handle_rect(x, y, w, h, handle)
+                        if rect:
+                            painter.setBrush(QColor(255, 255, 255))
+                            painter.drawRect(rect)
+
+            # Draw existing measurements
+            if self.measurements:
+                pen_line = QPen(QColor(0, 255, 0))
+                pen_line.setWidth(2)
+                pen_text = QPen(QColor(255, 255, 0))
+                for x1, y1, x2, y2, length_px, length_phys, unit in self.measurements:
+                    sx1 = int(x1 * self.scale_factor)
+                    sy1 = int(y1 * self.scale_factor)
+                    sx2 = int(x2 * self.scale_factor)
+                    sy2 = int(y2 * self.scale_factor)
+                    painter.setPen(pen_line)
+                    painter.drawLine(sx1, sy1, sx2, sy2)
+                    # Label near the middle of the line
+                    mx = (sx1 + sx2) // 2
+                    my = (sy1 + sy2) // 2
+                    label = f"{length_phys:.2f} {unit}"
+                    painter.setPen(pen_text)
+                    painter.drawText(mx + 5, my - 5, label)
+
+            # Draw live measurement preview
+            if self.measure_mode and self.measure_start is not None and self.measure_temp_end is not None:
+                x1, y1 = self.measure_start
+                x2, y2 = self.measure_temp_end
+                sx1 = int(x1 * self.scale_factor)
+                sy1 = int(y1 * self.scale_factor)
+                sx2 = int(x2 * self.scale_factor)
+                sy2 = int(y2 * self.scale_factor)
+                pen_preview = QPen(QColor(0, 200, 255))
+                pen_preview.setWidth(2)
+                painter.setPen(pen_preview)
+                painter.drawLine(sx1, sy1, sx2, sy2)
+
             painter.end()
         
         self.image_label.setPixmap(scaled_pixmap)
@@ -365,27 +476,21 @@ class ImageViewer(QWidget):
         scroll_x.setValue(int(x * self.scale_factor - (view_size.width() - width * self.scale_factor) / 2))
         scroll_y.setValue(int(y * self.scale_factor - (view_size.height() - height * self.scale_factor) / 2))
 
-    def keyPressEvent(self, event):
-        """Handle key press events"""
-        if event.key() == Qt.Key_Control:
-            self.is_ctrl_pressed = True
-            if self.roi is not None:
-                self.setCursor(Qt.SizeAllCursor)
-        super().keyPressEvent(event)
-
-    def keyReleaseEvent(self, event):
-        """Handle key release events"""
-        if event.key() == Qt.Key_Control:
-            self.is_ctrl_pressed = False
-            self.setCursor(Qt.ArrowCursor)
-        super().keyReleaseEvent(event)
-
     def mousePressEvent(self, event):
-        """Handle mouse press for panning and ROI resizing"""
+        """Handle mouse press for panning, ROI resizing, and measurements"""
         if event.button() == Qt.LeftButton:
             pos = self.image_label.mapFrom(self, event.pos())
-            
-            if self.is_ctrl_pressed:
+            ctrl_pressed = bool(event.modifiers() & Qt.ControlModifier)
+
+            # Measurement mode has priority over ROI/pan
+            if self.measure_mode and self.current_image is not None:
+                coords = self.map_to_image_coords(pos)
+                if coords is not None:
+                    self.measure_start = coords
+                    self.measure_temp_end = None
+                return
+
+            if ctrl_pressed:
                 # Handle ROI editing when Ctrl is pressed
                 handle = self.get_handle_at_pos(pos)
                 if handle:
@@ -410,13 +515,39 @@ class ImageViewer(QWidget):
                 self.last_pos = event.pos()
 
     def mouseReleaseEvent(self, event):
-        """Handle mouse release for panning, ROI resizing, and new ROI creation"""
+        """Handle mouse release for panning, ROI resizing, new ROI creation, and measurements"""
         if event.button() == Qt.LeftButton:
+            ctrl_pressed = bool(event.modifiers() & Qt.ControlModifier)
+            # Finish measurement if in measurement mode
+            if self.measure_mode and self.measure_start is not None and self.current_image is not None:
+                pos = self.image_label.mapFrom(self, event.pos())
+                end_coords = self.map_to_image_coords(pos)
+                if end_coords is not None:
+                    x1, y1 = self.measure_start
+                    x2, y2 = end_coords
+                    dx = x2 - x1
+                    dy = y2 - y1
+                    length_px = float(np.hypot(dx, dy))
+                    if length_px > 0.5:
+                        # Convert to physical units if configured
+                        if self.pixel_unit == "px":
+                            length_phys = length_px
+                            unit = "px"
+                        else:
+                            length_phys = length_px * self.pixel_size
+                            unit = self.pixel_unit
+                        self.measurements.append((x1, y1, x2, y2, length_px, length_phys, unit))
+                        self.display_image(self.current_image)
+                self.measure_start = None
+                self.measure_temp_end = None
+                return
+
             if self.resize_handle:
                 self.resize_handle = None
                 self.resize_start = None
                 self.resize_start_roi = None
-                if self.is_ctrl_pressed:
+                self.resize_start_img = None
+                if ctrl_pressed:
                     self.setCursor(Qt.SizeAllCursor)
                 else:
                     self.setCursor(Qt.ArrowCursor)
@@ -430,12 +561,21 @@ class ImageViewer(QWidget):
                 self.setCursor(Qt.ArrowCursor)
 
     def mouseMoveEvent(self, event):
-        """Handle mouse move for panning and ROI resizing"""
+        """Handle mouse move for panning, ROI resizing, and measurements"""
         pos = self.image_label.mapFrom(self, event.pos())
-        
+        ctrl_pressed = bool(event.modifiers() & Qt.ControlModifier)
+
+        # Live update for measurement mode
+        if self.measure_mode and self.measure_start is not None and self.current_image is not None:
+            coords = self.map_to_image_coords(pos)
+            if coords is not None:
+                self.measure_temp_end = coords
+                self.display_image(self.current_image)
+            return
+
         # Update cursor based on position and Ctrl state
         if not self.resize_handle and not self.new_roi_start:
-            if self.is_ctrl_pressed:
+            if ctrl_pressed:
                 if self.roi is not None:
                     handle = self.get_handle_at_pos(pos)
                     if handle == 'move':
@@ -454,28 +594,35 @@ class ImageViewer(QWidget):
                     self.setCursor(Qt.CrossCursor)
             else:
                 self.setCursor(Qt.ClosedHandCursor)
-        
-        if self.resize_handle and self.is_ctrl_pressed:
+
+        if self.resize_handle and ctrl_pressed:
             if self.roi is None:
                 return
-                
-            # Get scroll position
-            scroll_x = self.scroll_area.horizontalScrollBar().value()
-            scroll_y = self.scroll_area.verticalScrollBar().value()
-            
-            # Calculate movement in image coordinates
-            dx = (pos.x() + scroll_x - self.resize_start.x() - scroll_x) / self.scale_factor
-            dy = (pos.y() + scroll_y - self.resize_start.y() - scroll_y) / self.scale_factor
-            
+
+            # Calculate movement in image coordinates using start and current mouse positions
+            current_img_pos = self.map_to_image_coords(pos)
+            if current_img_pos is None:
+                return
+
+            if self.resize_start_img is None:
+                self.resize_start_img = self.map_to_image_coords(self.resize_start)
+                if self.resize_start_img is None:
+                    return
+
+            start_img_x, start_img_y = self.resize_start_img
+            curr_img_x, curr_img_y = current_img_pos
+            dx = curr_img_x - start_img_x
+            dy = curr_img_y - start_img_y
+
             x, y, w, h = self.resize_start_roi
-            
+
             if self.resize_handle == 'move':
                 new_x = max(0, min(x + dx, self.current_image.shape[1] - w))
                 new_y = max(0, min(y + dy, self.current_image.shape[0] - h))
-                self.roi = (new_x, new_y, w, h)
+                self.roi = (int(round(new_x)), int(round(new_y)), int(round(w)), int(round(h)))
             else:
                 new_x, new_y, new_w, new_h = x, y, w, h
-                
+
                 if 'left' in self.resize_handle:
                     new_x = max(0, min(x + dx, x + w - 10))
                     new_w = w - (new_x - x)
@@ -486,15 +633,20 @@ class ImageViewer(QWidget):
                     new_h = h - (new_y - y)
                 if 'bottom' in self.resize_handle:
                     new_h = max(10, min(h + dy, self.current_image.shape[0] - y))
-                
-                self.roi = (new_x, new_y, new_w, new_h)
-            
+
+                self.roi = (
+                    int(round(new_x)),
+                    int(round(new_y)),
+                    int(round(new_w)),
+                    int(round(new_h)),
+                )
+
             self.display_image(self.current_image)
             self.roi_changed.emit(self.roi)
-        elif self.new_roi_start is not None and self.is_ctrl_pressed:
+        elif self.new_roi_start is not None and ctrl_pressed:
             # Draw new ROI while dragging
             self.draw_new_roi(self.new_roi_start, pos)
-        elif self.pan_start is not None and not self.is_ctrl_pressed:
+        elif self.pan_start is not None and not ctrl_pressed:
             # Calculate movement
             delta = event.pos() - self.last_pos
             self.last_pos = event.pos()
@@ -505,6 +657,28 @@ class ImageViewer(QWidget):
             
             scroll_x.setValue(scroll_x.value() - delta.x())
             scroll_y.setValue(scroll_y.value() - delta.y())
+
+    def set_measure_mode(self, enabled):
+        """Enable or disable measurement mode."""
+        self.measure_mode = enabled
+        self.measure_start = None
+        self.measure_temp_end = None
+        cursor = Qt.CrossCursor if enabled else Qt.ArrowCursor
+        self.setCursor(cursor)
+        self.image_label.setCursor(cursor)
+
+    def clear_measurements(self):
+        """Remove all stored measurements."""
+        self.measurements.clear()
+        if self.current_image is not None:
+            self.display_image(self.current_image)
+
+    def on_calibration_changed(self, *args):
+        """Update calibration (physical size per pixel and unit)."""
+        self.pixel_size = float(self.pixel_size_spin.value())
+        self.pixel_unit = self.unit_combo.currentText()
+        if self.current_image is not None:
+            self.display_image(self.current_image)
 
     def create_new_roi(self, start_pos, end_pos):
         """Create a new ROI from start and end positions"""
