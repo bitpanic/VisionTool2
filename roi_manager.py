@@ -1,5 +1,5 @@
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QPushButton, 
-                             QLabel, QSpinBox, QHBoxLayout)
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QPushButton,
+                             QLabel, QSpinBox, QHBoxLayout, QCheckBox)
 from PyQt5.QtCore import Qt, pyqtSignal
 
 class ROIManager(QWidget):
@@ -10,6 +10,7 @@ class ROIManager(QWidget):
         self.image_viewer = image_viewer
         self.init_ui()
         self.roi = None
+        self.roi_enabled = True
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -70,9 +71,26 @@ class ROIManager(QWidget):
         self.apply_btn = QPushButton("Apply ROI")
         self.apply_btn.clicked.connect(self.apply_roi)
         button_layout.addWidget(self.apply_btn)
+
+        # Enable/disable ROI toggle
+        self.enable_checkbox = QCheckBox("Enable ROI")
+        self.enable_checkbox.setChecked(True)
+        self.enable_checkbox.stateChanged.connect(self.on_enable_changed)
+        button_layout.addWidget(self.enable_checkbox)
         
         layout.addLayout(button_layout)
-        
+
+        # Usage hints
+        hints = QLabel(
+            "Hints:\n"
+            "• Hold Ctrl and drag in the image to create or move/resize the ROI.\n"
+            "• Uncheck 'Enable ROI' to hide the ROI without losing its values.\n"
+            "• Use 'Apply ROI' after editing values here to update the image."
+        )
+        hints.setWordWrap(True)
+        hints.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(hints)
+
         # Add stretch to push everything to the top
         layout.addStretch()
 
@@ -84,22 +102,31 @@ class ROIManager(QWidget):
         height = self.height_spin.value()
         
         self.roi = (x, y, width, height)
-        self.image_viewer.set_roi(self.roi)
-        self.roi_changed.emit(self.roi)
+        if self.roi_enabled:
+            self.image_viewer.set_roi(self.roi)
+            self.roi_changed.emit(self.roi)
 
     def clear_roi(self):
         """Clear the current ROI"""
         self.roi = None
-        self.x_spin.setValue(0)
-        self.y_spin.setValue(0)
-        self.width_spin.setValue(1)
-        self.height_spin.setValue(1)
-        self.image_viewer.set_roi(None)
-        self.roi_changed.emit(None)
+        # Block spinbox signals so we don't emit multiple roi_changed events
+        for spin, value in (
+            (self.x_spin, 0),
+            (self.y_spin, 0),
+            (self.width_spin, 1),
+            (self.height_spin, 1),
+        ):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+        # Single update to viewer and listeners
+        if self.roi_enabled:
+            self.image_viewer.set_roi(None)
+            self.roi_changed.emit(None)
 
     def apply_roi(self):
         """Apply the current ROI to the image viewer and trigger pipeline update"""
-        if self.roi is not None:
+        if self.roi is not None and self.roi_enabled:
             self.image_viewer.set_roi(self.roi)
             self.roi_changed.emit(self.roi)
 
@@ -113,12 +140,33 @@ class ROIManager(QWidget):
         """Set the ROI values"""
         if roi is not None:
             x, y, width, height = roi
-            self.x_spin.setValue(x)
-            self.y_spin.setValue(y)
-            self.width_spin.setValue(width)
-            self.height_spin.setValue(height)
+            # Block signals while updating UI from code to avoid
+            # repeated roi_changed emissions and slow updates
+            for spin, value in (
+                (self.x_spin, x),
+                (self.y_spin, y),
+                (self.width_spin, width),
+                (self.height_spin, height),
+            ):
+                spin.blockSignals(True)
+                spin.setValue(value)
+                spin.blockSignals(False)
             self.roi = roi
-            self.image_viewer.set_roi(self.roi)
-            self.roi_changed.emit(self.roi)
+            if self.roi_enabled:
+                self.image_viewer.set_roi(self.roi)
+                self.roi_changed.emit(self.roi)
         else:
             self.clear_roi() 
+
+    def on_enable_changed(self, state):
+        """Toggle ROI effect on/off without losing coordinates."""
+        self.roi_enabled = state == Qt.Checked
+        if self.roi_enabled:
+            # Reapply stored ROI (if any)
+            if self.roi is not None:
+                self.image_viewer.set_roi(self.roi)
+                self.roi_changed.emit(self.roi)
+        else:
+            # Temporarily disable ROI but keep coordinates in the spin boxes
+            self.image_viewer.set_roi(None)
+            self.roi_changed.emit(None)

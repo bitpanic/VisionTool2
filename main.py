@@ -36,18 +36,10 @@ class MainWindow(QMainWindow):
         central_layout.addWidget(self.image_viewer)
         self.setCentralWidget(central_widget)
 
-        # Left: Only Parameters panel (fixed width)
+        # Create parameter panel (will live under the pipeline on the right)
         self.parameter_panel = ParameterPanel()
-        left_dock = QDockWidget("Parameters", self)
-        left_dock.setWidget(self.parameter_panel)
-        left_dock.setAllowedAreas(Qt.LeftDockWidgetArea)
-        left_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
-        fixed_width = 260
-        left_dock.setMinimumWidth(fixed_width)
-        left_dock.setMaximumWidth(fixed_width)
-        self.addDockWidget(Qt.LeftDockWidgetArea, left_dock)
 
-        # Right: ROI controls, Histogram, Plugins, Pipeline
+        # Right: ROI controls, Histogram, Plugins, Pipeline + Parameters
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -59,15 +51,25 @@ class MainWindow(QMainWindow):
         self.roi_manager.setMinimumHeight(120)
         self.histogram_widget.setMinimumHeight(140)
         self.plugin_manager.setMinimumHeight(180)
-        self.processing_pipeline.setMinimumHeight(180)
+
+        # Container to stack pipeline list on top of its parameters
+        pipeline_container = QWidget()
+        pipeline_layout = QVBoxLayout(pipeline_container)
+        pipeline_layout.setContentsMargins(0, 0, 0, 0)
+        pipeline_layout.setSpacing(4)
+        self.processing_pipeline.setMinimumHeight(140)
+        self.parameter_panel.setMinimumHeight(140)
+        pipeline_layout.addWidget(self.processing_pipeline)
+        pipeline_layout.addWidget(self.parameter_panel)
+
         right_layout.addWidget(self.roi_manager)
         right_layout.addWidget(self.histogram_widget)
         right_layout.addWidget(self.plugin_manager)
-        right_layout.addWidget(self.processing_pipeline)
+        right_layout.addWidget(pipeline_container)
         right_layout.setStretch(0, 1)
         right_layout.setStretch(1, 1)
         right_layout.setStretch(2, 2)
-        right_layout.setStretch(3, 2)
+        right_layout.setStretch(3, 3)
         right_dock = QDockWidget("", self)
         right_dock.setWidget(right_widget)
         right_dock.setAllowedAreas(Qt.RightDockWidgetArea)

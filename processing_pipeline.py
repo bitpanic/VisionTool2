@@ -1,8 +1,8 @@
 import json
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QListWidget, 
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QListWidget,
                              QPushButton, QHBoxLayout, QListWidgetItem,
                              QFileDialog)
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal, Qt
 
 class ProcessingPipeline(QWidget):
     pipeline_updated = pyqtSignal(object)
@@ -22,6 +22,7 @@ class ProcessingPipeline(QWidget):
         # Create pipeline list
         self.pipeline_list = QListWidget()
         self.pipeline_list.currentItemChanged.connect(self.on_plugin_selected)
+        self.pipeline_list.itemChanged.connect(self.on_item_changed)
         layout.addWidget(self.pipeline_list)
         
         # Create control buttons
@@ -62,6 +63,9 @@ class ProcessingPipeline(QWidget):
         """Add a plugin to the pipeline"""
         self.pipeline.append(plugin)
         item = QListWidgetItem(plugin.get_name())
+        # Make the item checkable so steps can be enabled/disabled
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        item.setCheckState(Qt.Checked)
         self.pipeline_list.addItem(item)
         self.plugin_added.emit(plugin)
         # Run pipeline to update the image
@@ -134,7 +138,11 @@ class ProcessingPipeline(QWidget):
             x, y, w, h = roi
             roi_image = self.original_image[y:y+h, x:x+w].copy()
             result = roi_image.copy()
-            for plugin in self.pipeline:
+            for idx, plugin in enumerate(self.pipeline):
+                # Skip disabled steps (unchecked items)
+                item = self.pipeline_list.item(idx)
+                if item is not None and item.checkState() == Qt.Unchecked:
+                    continue
                 if result is not None:
                     result = plugin.process(result)
             output = self.original_image.copy()
@@ -218,4 +226,13 @@ class ProcessingPipeline(QWidget):
         if current is not None:
             row = self.pipeline_list.row(current)
             if 0 <= row < len(self.pipeline):
-                self.plugin_selected.emit(self.pipeline[row]) 
+                self.plugin_selected.emit(self.pipeline[row])
+
+    def on_item_changed(self, item):
+        """Re-run pipeline when a step is enabled/disabled."""
+        # Avoid running when there is no original image yet
+        if self.original_image is None:
+            return
+        # Re-run on the current viewer image to update display
+        if self.image_viewer.get_current_image() is not None:
+            self.run_pipeline(self.image_viewer.get_current_image())

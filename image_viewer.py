@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea, QHBoxLayout, QPushButton, QDoubleSpinBox, QComboBox, QApplication
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea, QHBoxLayout, QPushButton, QDoubleSpinBox, QComboBox, QApplication, QFileDialog
 from PyQt5.QtCore import Qt, QSize, QPoint, pyqtSignal, QRect
 from PyQt5.QtGui import QImage, QPixmap, QCursor, QPainter, QPen, QColor
 
@@ -59,6 +59,11 @@ class ImageViewer(QWidget):
         self.zoom_roi_btn = QPushButton("Zoom to ROI")
         self.zoom_roi_btn.clicked.connect(self.zoom_to_roi)
         toolbar.addWidget(self.zoom_roi_btn)
+
+        # Export current image (without overlays)
+        self.export_img_btn = QPushButton("Export Image")
+        self.export_img_btn.clicked.connect(self.export_current_image)
+        toolbar.addWidget(self.export_img_btn)
 
         # Measurement mode toggle
         self.measure_btn = QPushButton("Measure")
@@ -240,6 +245,39 @@ class ImageViewer(QWidget):
         self.lut_enabled = True
         if self.current_image is not None:
             self.display_image(self.current_image)
+
+    def export_current_image(self):
+        """Export the current processed image (with LUT, without overlays)."""
+        if self.current_image is None:
+            return
+
+        # Apply LUT and convert to RGB for saving
+        img = self.apply_lut(self.current_image)
+        if img is None:
+            return
+
+        if len(img.shape) == 3:
+            save_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            height, width = save_img.shape[:2]
+            bytes_per_line = 3 * width
+            qimg = QImage(save_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        else:
+            # Grayscale
+            height, width = img.shape
+            bytes_per_line = width
+            qimg = QImage(img.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
+
+        file_name, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Image",
+            "",
+            "PNG Image (*.png);;JPEG Image (*.jpg *.jpeg)"
+        )
+        if not file_name:
+            return
+
+        pixmap = QPixmap.fromImage(qimg)
+        pixmap.save(file_name)
 
     def display_image(self, image):
         """Display the given image"""
@@ -543,16 +581,18 @@ class ImageViewer(QWidget):
                 return
 
             if self.resize_handle:
+                # Finish ROI move/resize and emit a single change event
                 self.resize_handle = None
                 self.resize_start = None
                 self.resize_start_roi = None
                 self.resize_start_img = None
+                self.roi_changed.emit(self.roi)
                 if ctrl_pressed:
                     self.setCursor(Qt.SizeAllCursor)
                 else:
                     self.setCursor(Qt.ArrowCursor)
             elif self.new_roi_start is not None:
-                # Finish new ROI creation
+                # Finish new ROI creation and emit change event once
                 pos = self.image_label.mapFrom(self, event.pos())
                 self.create_new_roi(self.new_roi_start, pos)
                 self.new_roi_start = None
@@ -642,7 +682,6 @@ class ImageViewer(QWidget):
                 )
 
             self.display_image(self.current_image)
-            self.roi_changed.emit(self.roi)
         elif self.new_roi_start is not None and ctrl_pressed:
             # Draw new ROI while dragging
             self.draw_new_roi(self.new_roi_start, pos)
