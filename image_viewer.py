@@ -23,7 +23,7 @@ class ImageViewer(QWidget):
         self.resize_start_img = None  # Mouse position in image coords at start of resize/move
         self.handle_size = 8  # Size of resize handles in pixels
         self.new_roi_start = None  # Starting point for new ROI creation
-        # Calibration, measurement, and LUT
+        # Calibration, measurement, LUT, and view mode
         self.pixel_size = 1.0  # physical units per pixel
         self.pixel_unit = "px"
         self.measure_mode = False
@@ -33,6 +33,9 @@ class ImageViewer(QWidget):
         self.lut_enabled = False
         self.lut_low = 0
         self.lut_high = 255
+        self.view_mode = "rgb"  # rgb, gray, h, s, v
+        self.hsv_s_scale = 1.0
+        self.hsv_v_scale = 1.0
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -226,23 +229,54 @@ class ImageViewer(QWidget):
         return None
 
     def apply_lut(self, image):
-        """Apply simple window LUT [lut_low, lut_high] to image."""
+        """Apply window LUT [lut_low, lut_high] to image (on brightness).
+
+        - Grayscale: window is applied directly to intensities.
+        - Color: window is applied to the V channel in HSV, then converted back to BGR.
+        """
         if not self.lut_enabled or image is None:
             return image
+
         low = max(0, min(255, int(self.lut_low)))
         high = max(0, min(255, int(self.lut_high)))
         if high <= low:
             return image
-        img = image.astype(np.float32)
-        img = (img - low) * (255.0 / float(high - low))
-        img = np.clip(img, 0, 255).astype(np.uint8)
-        return img
+
+        if len(image.shape) == 2 or image.shape[2] == 1:
+            # Grayscale image
+            img = image.astype(np.float32)
+            img = (img - low) * (255.0 / float(high - low))
+            img = np.clip(img, 0, 255).astype(np.uint8)
+            return img
+
+        # Color image: work in HSV space on V channel
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).astype(np.float32)
+        h, s, v = cv2.split(hsv)
+
+        v = (v - low) * (255.0 / float(high - low))
+        v = np.clip(v, 0, 255)
+        hsv_merged = cv2.merge([h, s, v]).astype(np.uint8)
+        result = cv2.cvtColor(hsv_merged, cv2.COLOR_HSV2BGR)
+        return result
 
     def set_lut(self, low, high):
         """Set LUT window and refresh display."""
         self.lut_low = int(low)
         self.lut_high = int(high)
         self.lut_enabled = True
+        if self.current_image is not None:
+            self.display_image(self.current_image)
+
+    def set_view_mode(self, mode):
+        """Set how the image is visualized: rgb / gray / h / s / v."""
+        self.view_mode = mode
+        if self.current_image is not None:
+            self.display_image(self.current_image)
+
+    def set_hsv_scales(self, s_scale, v_scale):
+        """Set scaling factors for HSV saturation and value."""
+        self.hsv_s_scale = max(0.0, float(s_scale))
+        self.hsv_v_scale = max(0.0, float(v_scale))
         if self.current_image is not None:
             self.display_image(self.current_image)
 
@@ -284,12 +318,43 @@ class ImageViewer(QWidget):
         if image is None:
             return
 
-        # Apply LUT before color conversion
+        # Apply LUT before view-mode/color operations
         image = self.apply_lut(image)
 
-        # Convert BGR to RGB
-        if len(image.shape) == 3:
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # Apply view mode and HSV scaling
+        if image is not None and len(image.shape) == 3:
+            bgr = image
+            hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+            h, s, v = cv2.split(hsv)
+
+            # Apply global S/V scaling
+            s *= self.hsv_s_scale
+            v *= self.hsv_v_scale
+            s = np.clip(s, 0, 255)
+            v = np.clip(v, 0, 255)
+
+            if self.view_mode == "gray":
+                # Show value channel as grayscale
+                gray = v.astype(np.uint8)
+                image = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+            elif self.view_mode in ("h", "s", "v"):
+                if self.view_mode == "h":
+                    ch = h * (255.0 / 179.0)  # Hue 0-179 -> 0-255
+                elif self.view_mode == "s":
+                    ch = s
+                else:  # "v"
+                    ch = v
+                ch = np.clip(ch, 0, 255).astype(np.uint8)
+                image = cv2.cvtColor(ch, cv2.COLOR_GRAY2RGB)
+            else:
+                # Standard RGB view with adjusted S/V
+                hsv_merged = cv2.merge([h, s, v]).astype(np.uint8)
+                bgr_adj = cv2.cvtColor(hsv_merged, cv2.COLOR_HSV2BGR)
+                image = cv2.cvtColor(bgr_adj, cv2.COLOR_BGR2RGB)
+        else:
+            # Grayscale image: convert once to RGB for display
+            if image is not None and len(image.shape) == 2:
+                image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
         
         height, width = image.shape[:2]
         bytes_per_line = 3 * width

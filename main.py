@@ -3,7 +3,8 @@ import json
 import os
 print("Starting application...")
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QDockWidget, QWidget, QVBoxLayout, QHBoxLayout,
-                            QMenuBar, QMenu, QAction, QFileDialog, QMessageBox, QSplitter)
+                            QMenuBar, QMenu, QAction, QFileDialog, QMessageBox, QSplitter,
+                            QFormLayout, QComboBox, QDoubleSpinBox, QLabel)
 print("PyQt5 imported successfully")
 from PyQt5.QtCore import Qt
 from image_viewer import ImageViewer
@@ -52,6 +53,34 @@ class MainWindow(QMainWindow):
         self.histogram_widget.setMinimumHeight(140)
         self.plugin_manager.setMinimumHeight(180)
 
+        # Color / view controls (below histogram)
+        color_ctrl = QWidget()
+        color_layout = QFormLayout(color_ctrl)
+        color_layout.setContentsMargins(0, 0, 0, 0)
+        color_layout.setSpacing(2)
+
+        self.view_mode_combo = QComboBox()
+        self.view_mode_combo.addItems(["RGB", "Grayscale", "HSV - H", "HSV - S", "HSV - V"])
+        self.view_mode_combo.setCurrentText("RGB")
+        self.view_mode_combo.currentTextChanged.connect(self.on_view_mode_changed)
+        color_layout.addRow(QLabel("View mode:"), self.view_mode_combo)
+
+        self.s_scale_spin = QDoubleSpinBox()
+        self.s_scale_spin.setRange(0.0, 3.0)
+        self.s_scale_spin.setSingleStep(0.1)
+        self.s_scale_spin.setDecimals(2)
+        self.s_scale_spin.setValue(1.0)
+        self.s_scale_spin.valueChanged.connect(self.on_hsv_scale_changed)
+        color_layout.addRow(QLabel("S scale:"), self.s_scale_spin)
+
+        self.v_scale_spin = QDoubleSpinBox()
+        self.v_scale_spin.setRange(0.0, 3.0)
+        self.v_scale_spin.setSingleStep(0.1)
+        self.v_scale_spin.setDecimals(2)
+        self.v_scale_spin.setValue(1.0)
+        self.v_scale_spin.valueChanged.connect(self.on_hsv_scale_changed)
+        color_layout.addRow(QLabel("V scale:"), self.v_scale_spin)
+
         # Container to stack pipeline list on top of its parameters
         pipeline_container = QWidget()
         pipeline_layout = QVBoxLayout(pipeline_container)
@@ -64,12 +93,14 @@ class MainWindow(QMainWindow):
 
         right_layout.addWidget(self.roi_manager)
         right_layout.addWidget(self.histogram_widget)
+        right_layout.addWidget(color_ctrl)
         right_layout.addWidget(self.plugin_manager)
         right_layout.addWidget(pipeline_container)
         right_layout.setStretch(0, 1)
         right_layout.setStretch(1, 1)
-        right_layout.setStretch(2, 2)
-        right_layout.setStretch(3, 3)
+        right_layout.setStretch(2, 0)  # color controls
+        right_layout.setStretch(3, 2)
+        right_layout.setStretch(4, 3)
         right_dock = QDockWidget("", self)
         right_dock.setWidget(right_widget)
         right_dock.setAllowedAreas(Qt.RightDockWidgetArea)
@@ -230,6 +261,24 @@ class MainWindow(QMainWindow):
     def on_lut_changed(self, low, high):
         """Update viewer LUT from histogram widget."""
         self.image_viewer.set_lut(low, high)
+
+    def on_view_mode_changed(self, text):
+        """Change viewer color / grayscale / HSV view mode."""
+        mapping = {
+            "RGB": "rgb",
+            "Grayscale": "gray",
+            "HSV - H": "h",
+            "HSV - S": "s",
+            "HSV - V": "v",
+        }
+        mode = mapping.get(text, "rgb")
+        self.image_viewer.set_view_mode(mode)
+
+    def on_hsv_scale_changed(self, *args):
+        """Update HSV S/V scaling in the viewer."""
+        s_scale = float(self.s_scale_spin.value())
+        v_scale = float(self.v_scale_spin.value())
+        self.image_viewer.set_hsv_scales(s_scale, v_scale)
 
     def on_roi_changed(self, roi):
         """Handle ROI changes by updating the image viewer and running the pipeline"""

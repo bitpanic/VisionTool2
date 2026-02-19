@@ -1,33 +1,10 @@
 {
-  "image_path": "//192.168.2.1/project/#_Evaluations/POG/images of defects/T2_1.2coax.jpg",
+  "image_path": "//192.168.2.1/project/#_Evaluations/POG/images of defects/T1_1.2coax.jpg",
   "roi": [
-    1716,
-    2399,
-    1464,
-    554
+    1680,
+    1689,
+    1120,
+    1126
   ],
-  "pipeline": [
-    {
-      "name": "Contrast Enhancement",
-      "parameters": {
-        "clip_limit": 2.0,
-        "tile_size": 8,
-        "apply_clahe": true
-      }
-    },
-    {
-      "name": "Blob Detector",
-      "parameters": {
-        "min_threshold": 10,
-        "max_threshold": 200,
-        "threshold_step": 10,
-        "min_area": 100,
-        "max_area": 5000,
-        "min_circularity": 0.1,
-        "min_convexity": 0.87,
-        "max_convexity": 1.0,
-        "min_inertia_ratio": 0.01
-      }
-    }
-  ]
+  "pipeline": []
 }

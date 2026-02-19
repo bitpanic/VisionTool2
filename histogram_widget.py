@@ -20,18 +20,23 @@ class HistogramWidget(QWidget):
         self.setMinimumHeight(120)
 
     def set_image(self, image):
-        """Update histogram from a BGR or grayscale image."""
+        """Update histogram from a BGR or grayscale image.
+
+        For color images, the histogram is computed from the V channel in HSV,
+        which better reflects perceived brightness for LUT windowing.
+        """
         if image is None:
             self.histogram = np.zeros(256, dtype=np.float32)
             self.update()
             return
 
         if len(image.shape) == 3:
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+            channel = hsv[:, :, 2]  # V channel
         else:
-            gray = image
+            channel = image
 
-        hist, _ = np.histogram(gray.flatten(), bins=256, range=(0, 255))
+        hist, _ = np.histogram(channel.flatten(), bins=256, range=(0, 255))
         self.histogram = hist.astype(np.float32)
         self.update()
 
