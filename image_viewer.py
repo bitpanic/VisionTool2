@@ -36,6 +36,8 @@ class ImageViewer(QWidget):
         self.view_mode = "rgb"  # rgb, gray, h, s, v
         self.hsv_s_scale = 1.0
         self.hsv_v_scale = 1.0
+        # Edge measurement overlay (set by analysis plugins)
+        self.edge_overlay = None
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -119,6 +121,8 @@ class ImageViewer(QWidget):
         """Load an image from file"""
         self.current_image = cv2.imread(image_path)
         if self.current_image is not None:
+            # Remember image path for analysis/export tools
+            self.image_path = image_path
             self.display_image(self.current_image)
             self.zoom_to_fit()
             return True
@@ -379,6 +383,7 @@ class ImageViewer(QWidget):
             self.roi is not None
             or bool(self.measurements)
             or (self.measure_mode and self.measure_start is not None and self.measure_temp_end is not None)
+            or (self.edge_overlay is not None)
         )
 
         if needs_painter:
@@ -446,6 +451,62 @@ class ImageViewer(QWidget):
                 painter.setPen(pen_preview)
                 painter.drawLine(sx1, sy1, sx2, sy2)
 
+            # Draw edge measurement overlays (peaks, cross-sections, heat)
+            if self.edge_overlay:
+                # Peaks along main line or selected cross-section
+                peaks = self.edge_overlay.get("peaks") or []
+                if peaks:
+                    pen_peaks = QPen(QColor(255, 0, 255))
+                    pen_peaks.setWidth(4)
+                    painter.setPen(pen_peaks)
+                    for px, py in peaks:
+                        sx = int(px * self.scale_factor)
+                        sy = int(py * self.scale_factor)
+                        painter.drawPoint(sx, sy)
+
+                # Optional edge width markers
+                width_pts = self.edge_overlay.get("width_points") or []
+                if width_pts:
+                    pen_width = QPen(QColor(255, 128, 0))
+                    pen_width.setWidth(3)
+                    painter.setPen(pen_width)
+                    for px, py in width_pts:
+                        sx = int(px * self.scale_factor)
+                        sy = int(py * self.scale_factor)
+                        painter.drawPoint(sx, sy)
+
+                # Cross-sections (only a subset should be provided by the plugin)
+                cs_lines = self.edge_overlay.get("cross_sections") or []
+                if cs_lines:
+                    pen_cs = QPen(QColor(0, 200, 255))
+                    pen_cs.setWidth(1)
+                    pen_cs.setStyle(Qt.DashLine)
+                    painter.setPen(pen_cs)
+                    for (x0, y0, x1, y1) in cs_lines:
+                        sx0 = int(x0 * self.scale_factor)
+                        sy0 = int(y0 * self.scale_factor)
+                        sx1 = int(x1 * self.scale_factor)
+                        sy1 = int(y1 * self.scale_factor)
+                        painter.drawLine(sx0, sy0, sx1, sy1)
+
+                # Optional heat markers along evaluation path
+                heat_pts = self.edge_overlay.get("heat_points") or []
+                if heat_pts:
+                    for x, y, strength in heat_pts:
+                        # strength expected in [0,1]
+                        strength = max(0.0, min(1.0, float(strength)))
+                        color = QColor(
+                            int(255 * strength),
+                            int(255 * (1.0 - strength)),
+                            0,
+                        )
+                        pen_heat = QPen(color)
+                        pen_heat.setWidth(3)
+                        painter.setPen(pen_heat)
+                        sx = int(x * self.scale_factor)
+                        sy = int(y * self.scale_factor)
+                        painter.drawPoint(sx, sy)
+
             painter.end()
         
         self.image_label.setPixmap(scaled_pixmap)
@@ -458,6 +519,18 @@ class ImageViewer(QWidget):
     def get_current_image(self):
         """Return the current image"""
         return self.current_image.copy() if self.current_image is not None else None
+
+    def set_edge_overlay(self, overlay):
+        """Set edge measurement overlay specification and refresh display."""
+        self.edge_overlay = overlay
+        if self.current_image is not None:
+            self.display_image(self.current_image)
+
+    def clear_edge_overlay(self):
+        """Clear any edge measurement overlays."""
+        self.edge_overlay = None
+        if self.current_image is not None:
+            self.display_image(self.current_image)
 
     def set_roi(self, roi):
         """Set the Region of Interest"""

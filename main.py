@@ -15,6 +15,7 @@ from processing_pipeline import ProcessingPipeline
 print("ProcessingPipeline imported")
 from parameter_panel import ParameterPanel
 print("ParameterPanel imported")
+from edge_measurement_panel import EdgeMeasurementPanel
 from roi_manager import ROIManager
 print("ROIManager imported")
 from histogram_widget import HistogramWidget
@@ -28,19 +29,27 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1200, 800)
         self.last_image_path = None
 
-        # Central image viewer
+        # Central: image viewer + (parameters + Edge Measurement results) side-by-side
         self.image_viewer = ImageViewer()
-        central_widget = QWidget()
-        central_layout = QVBoxLayout(central_widget)
-        central_layout.setContentsMargins(0, 0, 0, 0)
-        central_layout.setContentsMargins(0, 0, 0, 0)
-        central_layout.addWidget(self.image_viewer)
-        self.setCentralWidget(central_widget)
-
-        # Create parameter panel (will live under the pipeline on the right)
+        self.edge_measure_panel = EdgeMeasurementPanel()
         self.parameter_panel = ParameterPanel()
 
-        # Right: ROI controls, Histogram, Plugins, Pipeline + Parameters
+        right_center_widget = QWidget()
+        right_center_layout = QVBoxLayout(right_center_widget)
+        right_center_layout.setContentsMargins(0, 0, 0, 0)
+        right_center_layout.setSpacing(4)
+        # Parameters for the selected pipeline step on top, Edge Measurement results below
+        right_center_layout.addWidget(self.parameter_panel)
+        right_center_layout.addWidget(self.edge_measure_panel)
+
+        center_splitter = QSplitter(Qt.Horizontal)
+        center_splitter.addWidget(self.image_viewer)
+        center_splitter.addWidget(right_center_widget)
+        center_splitter.setStretchFactor(0, 3)
+        center_splitter.setStretchFactor(1, 2)
+        self.setCentralWidget(center_splitter)
+
+        # Right: ROI controls, Histogram, Plugins, Pipeline
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -48,10 +57,11 @@ class MainWindow(QMainWindow):
         self.roi_manager = ROIManager(self.image_viewer)
         self.histogram_widget = HistogramWidget()
         self.plugin_manager = PluginManager()
-        self.processing_pipeline = ProcessingPipeline(self.image_viewer)
+        self.processing_pipeline = ProcessingPipeline(self.image_viewer, self.edge_measure_panel)
         self.roi_manager.setMinimumHeight(120)
         self.histogram_widget.setMinimumHeight(140)
-        self.plugin_manager.setMinimumHeight(180)
+        # Make Filters/Detectors list more compact so parameters get more space
+        self.plugin_manager.setMinimumHeight(80)
 
         # Color / view controls (below histogram)
         color_ctrl = QWidget()
@@ -81,26 +91,25 @@ class MainWindow(QMainWindow):
         self.v_scale_spin.valueChanged.connect(self.on_hsv_scale_changed)
         color_layout.addRow(QLabel("V scale:"), self.v_scale_spin)
 
-        # Container to stack pipeline list on top of its parameters
+        # Container for the pipeline list
         pipeline_container = QWidget()
         pipeline_layout = QVBoxLayout(pipeline_container)
         pipeline_layout.setContentsMargins(0, 0, 0, 0)
         pipeline_layout.setSpacing(4)
-        self.processing_pipeline.setMinimumHeight(140)
-        self.parameter_panel.setMinimumHeight(140)
+        self.processing_pipeline.setMinimumHeight(160)
         pipeline_layout.addWidget(self.processing_pipeline)
-        pipeline_layout.addWidget(self.parameter_panel)
 
         right_layout.addWidget(self.roi_manager)
         right_layout.addWidget(self.histogram_widget)
         right_layout.addWidget(color_ctrl)
         right_layout.addWidget(self.plugin_manager)
         right_layout.addWidget(pipeline_container)
-        right_layout.setStretch(0, 1)
-        right_layout.setStretch(1, 1)
+        # Give more vertical space to the pipeline + parameter panel
+        right_layout.setStretch(0, 1)  # ROI manager
+        right_layout.setStretch(1, 1)  # histogram
         right_layout.setStretch(2, 0)  # color controls
-        right_layout.setStretch(3, 2)
-        right_layout.setStretch(4, 3)
+        right_layout.setStretch(3, 1)  # plugin list (Filters/Detectors)
+        right_layout.setStretch(4, 3)  # pipeline + parameters
         right_dock = QDockWidget("", self)
         right_dock.setWidget(right_widget)
         right_dock.setAllowedAreas(Qt.RightDockWidgetArea)
@@ -281,17 +290,22 @@ class MainWindow(QMainWindow):
         self.image_viewer.set_hsv_scales(s_scale, v_scale)
 
     def on_roi_changed(self, roi):
-        """Handle ROI changes by updating the image viewer and running the pipeline"""
-        # First update the image viewer
+        """Handle ROI changes by updating the image viewer.
+
+        The processing pipeline is normally run explicitly via the Run
+        button. However, when the ROI is disabled/cleared, we also
+        reset the pipeline output so the image no longer shows a
+        previously processed ROI region.
+        """
+        # Update the image viewer ROI
         self.image_viewer.set_roi(roi)
         # Force a repaint of the image viewer
         self.image_viewer.repaint()
-        # Then run the pipeline with the original image
-        if self.image_viewer.get_current_image() is not None:
-            # Get the original image from the pipeline
-            original_image = self.image_viewer.get_current_image()
-            # Run pipeline with original image
-            self.processing_pipeline.run_pipeline(original_image)
+
+        # If ROI is disabled/cleared, reset pipeline output to original image
+        if roi is None:
+            self.processing_pipeline.reset_pipeline()
+
         self.save_session()
 
     def save_session(self):

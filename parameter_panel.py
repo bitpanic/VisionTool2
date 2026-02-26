@@ -64,6 +64,45 @@ class ParameterPanel(QWidget):
                     widget.addItem(str(item))
                 widget.currentTextChanged.connect(lambda v, n=name: self.on_parameter_changed(n, v))
             
+            # Strings are used by some plugins (e.g. Edge Measurement) for
+            # enum-like parameters such as mode or gradient method. For these,
+            # show a combo box with known choices.
+            elif isinstance(value, str):
+                choices_map = {
+                    "Measurement mode": [
+                        "Along line (single profile)",
+                        "Perpendicular cross-sections (multi profile)",
+                    ],
+                    "Sampling mode": [
+                        "Step (px)",
+                        "Num samples",
+                    ],
+                    "Smoothing type": [
+                        "None",
+                        "Gaussian",
+                        "Savitzky-Golay",
+                    ],
+                    "Gradient method": [
+                        "Sobel",
+                        "Scharr",
+                    ],
+                    "Overlay metric": [
+                        "peak_to_peak",
+                        "edge_width",
+                    ],
+                }
+                if name in choices_map:
+                    widget = QComboBox()
+                    for item in choices_map[name]:
+                        widget.addItem(str(item))
+                    # Try to restore previous selection if possible
+                    idx = widget.findText(value)
+                    if idx >= 0:
+                        widget.setCurrentIndex(idx)
+                    widget.currentTextChanged.connect(lambda v, n=name: self.on_parameter_changed(n, v))
+                else:
+                    continue  # Skip unsupported plain string parameters
+
             else:
                 continue  # Skip unsupported parameter types
             

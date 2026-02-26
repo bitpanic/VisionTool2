@@ -1,10 +1,51 @@
 {
-  "image_path": "//192.168.2.1/project/#_Evaluations/POG/images of defects/T1_1.2coax.jpg",
+  "image_path": "//192.168.2.1/project/#_Evaluations/#Newlight/thired.jpg",
   "roi": [
-    1680,
-    1689,
-    1120,
-    1126
+    2071,
+    2092,
+    1023,
+    1098
   ],
-  "pipeline": []
+  "pipeline": [
+    {
+      "name": "Edge Measurement",
+      "parameters": {
+        "Measurement mode": "Perpendicular cross-sections (multi profile)",
+        "Sampling mode": [
+          "Step (px)",
+          "Num samples"
+        ],
+        "Step (px)": 0.5,
+        "Num samples": 500,
+        "Cross-section count M": 21,
+        "Cross-section length W (px)": 20.0,
+        "Samples per cross-section": 64,
+        "Align cross-sections to local gradient": false,
+        "Gradient method": [
+          "Sobel",
+          "Scharr"
+        ],
+        "Gradient sigma": 1.0,
+        "Min gradient magnitude": 5.0,
+        "Gradient radius r": 1,
+        "Multi-line average enabled": false,
+        "Multi-line count K": 3,
+        "Multi-line offset d (px)": 0.5,
+        "Smoothing type": [
+          "None",
+          "Gaussian",
+          "Savitzky-Golay"
+        ],
+        "Gaussian sigma": 1.0,
+        "SavGol window": 7,
+        "SavGol polyorder": 2,
+        "Normalize 0-1": true,
+        "Cross-section overlay stride": 3,
+        "Overlay metric": [
+          "peak_to_peak",
+          "edge_width"
+        ]
+      }
+    }
+  ]
 }

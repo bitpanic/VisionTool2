@@ -9,9 +9,10 @@ class ProcessingPipeline(QWidget):
     plugin_added = pyqtSignal(object)
     plugin_selected = pyqtSignal(object)
 
-    def __init__(self, image_viewer):
+    def __init__(self, image_viewer, edge_measure_panel=None):
         super().__init__()
         self.image_viewer = image_viewer
+        self.edge_measure_panel = edge_measure_panel
         self.init_ui()
         self.pipeline = []
         self.original_image = None  # Store the original image
@@ -43,6 +44,11 @@ class ProcessingPipeline(QWidget):
         self.reset_btn = QPushButton("Reset")
         self.reset_btn.clicked.connect(self.reset_pipeline)
         button_layout.addWidget(self.reset_btn)
+
+        # Explicit run button so pipeline only runs when requested
+        self.run_btn = QPushButton("Run")
+        self.run_btn.clicked.connect(self.run_now)
+        button_layout.addWidget(self.run_btn)
         
         layout.addLayout(button_layout)
 
@@ -62,15 +68,23 @@ class ProcessingPipeline(QWidget):
     def add_plugin(self, plugin):
         """Add a plugin to the pipeline"""
         self.pipeline.append(plugin)
+        # Optionally provide context to plugins that support it
+        if hasattr(plugin, "set_context"):
+            try:
+                plugin.set_context(self.image_viewer, self.edge_measure_panel)
+            except TypeError:
+                # Backwards compatibility if set_context has a different signature
+                try:
+                    plugin.set_context(self.image_viewer)
+                except Exception:
+                    pass
         item = QListWidgetItem(plugin.get_name())
         # Make the item checkable so steps can be enabled/disabled
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
         item.setCheckState(Qt.Checked)
         self.pipeline_list.addItem(item)
         self.plugin_added.emit(plugin)
-        # Run pipeline to update the image
-        if self.image_viewer.get_current_image() is not None:
-            self.run_pipeline(self.image_viewer.get_current_image())
+        # Do not auto-run here; user can press Run
 
     def remove_plugin(self):
         """Remove the selected plugin from the pipeline"""
@@ -78,9 +92,7 @@ class ProcessingPipeline(QWidget):
         if current_row >= 0:
             self.pipeline_list.takeItem(current_row)
             self.pipeline.pop(current_row)
-            # Run pipeline to update the image
-            if self.image_viewer.get_current_image() is not None:
-                self.run_pipeline(self.image_viewer.get_current_image())
+            # Do not auto-run here; user can press Run
 
     def move_up(self):
         """Move the selected plugin up in the pipeline"""
@@ -95,9 +107,7 @@ class ProcessingPipeline(QWidget):
             self.pipeline[current_row], self.pipeline[current_row - 1] = \
                 self.pipeline[current_row - 1], self.pipeline[current_row]
             
-            # Run pipeline to update the image
-            if self.image_viewer.get_current_image() is not None:
-                self.run_pipeline(self.image_viewer.get_current_image())
+            # Do not auto-run here; user can press Run
 
     def move_down(self):
         """Move the selected plugin down in the pipeline"""
@@ -169,9 +179,7 @@ class ProcessingPipeline(QWidget):
         """Clear the pipeline"""
         self.pipeline.clear()
         self.pipeline_list.clear()
-        # Run pipeline to update the image
-        if self.image_viewer.get_current_image() is not None:
-            self.run_pipeline(self.image_viewer.get_current_image())
+        # Do not auto-run here; user can press Run
 
     def save_pipeline(self):
         """Save the current pipeline to a JSON file"""
@@ -217,9 +225,7 @@ class ProcessingPipeline(QWidget):
             for plugin_data in pipeline_data:
                 self.plugin_added.emit(plugin_data)
             
-            # Run pipeline to update the image
-            if self.image_viewer.get_current_image() is not None:
-                self.run_pipeline(self.image_viewer.get_current_image())
+            # Do not auto-run here; user can press Run
 
     def on_plugin_selected(self, current, previous):
         """Handle plugin selection in the pipeline list"""
@@ -229,10 +235,10 @@ class ProcessingPipeline(QWidget):
                 self.plugin_selected.emit(self.pipeline[row])
 
     def on_item_changed(self, item):
-        """Re-run pipeline when a step is enabled/disabled."""
-        # Avoid running when there is no original image yet
-        if self.original_image is None:
-            return
-        # Re-run on the current viewer image to update display
+        """Handle step enable/disable; pipeline runs only when user presses Run."""
+        return
+
+    def run_now(self):
+        """Run the pipeline explicitly when the user presses the Run button."""
         if self.image_viewer.get_current_image() is not None:
             self.run_pipeline(self.image_viewer.get_current_image())

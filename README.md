@@ -81,6 +81,41 @@ python3 main.py
 - Set **Units / pixel** and choose **px / µm / mm** to calibrate.
 - Use **Clear Measurements** to remove all measurement lines.
 
+### Edge Measurement Tool
+- Add the **Edge Measurement** filter from the Filters list into the pipeline and select it.
+- Use the viewer toolbar **Measure** button to draw a line across the edge you want to analyse; the latest line becomes the evaluation path.
+- In the **parameter panel (under the pipeline)** configure:
+  - **Measurement mode** (drop‑down):
+    - **Along line (single profile)**: uses only the drawn line and computes one 1D profile \(I(s)\) and its derivative; this is the classic edge‑spread measurement.
+    - **Perpendicular cross-sections (multi profile)**: treats the drawn line as an evaluation path and takes many short cross‑sections orthogonal to it; each cross‑section gets the same metrics as in the single‑profile case and they are aggregated (mean/median/std, etc.).
+  - **Sampling mode**:
+    - **Step (px)**: choose a physical step size along the line (e.g. 0.25, 0.5, 1.0 px).
+    - **Num samples**: choose an explicit number of samples along the line, independent of its length.
+  - **Cross‑sections (multi‑profile mode only)**:
+    - `Cross-section count M`: number of cross‑sections sampled along the evaluation path.
+    - `Cross-section length W (px)`: physical length of each cross‑section, in pixels.
+  - **Gradient alignment (optional)**:
+    - Enable **Align cross-sections to local gradient** to rotate each cross‑section to follow the local edge normal instead of the simple perpendicular to the drawn line.
+    - Select **Gradient method** (Sobel/Scharr), optionally increase **Gradient sigma** and **Gradient radius r** to smooth noisy gradients, and set **Min gradient magnitude** to ignore very weak edges.
+  - **Robustness (Multi‑line average)**:
+    - Enable `Multi-line average enabled`, then set `Multi-line count K` and `Multi-line offset d (px)` to sample several parallel profiles around the main one and average them; this reduces the influence of texture/noise.
+  - **Pre‑processing**:
+    - Choose `Smoothing type` (None / Gaussian / Savitzky‑Golay) and its parameters.
+    - Toggle `Normalize 0-1` to normalize the profile before derivative/width computation.
+- Press the pipeline **Run** button:
+  - The image content itself is unchanged, but overlays appear on top:
+    - In **Along line** mode: peak locations and (optionally) 10–90% edge‑width markers on the line.
+    - In **Cross‑section** modes: a subset of cross‑section lines plus an optional color “heat” along the evaluation path indicating a chosen metric (e.g. peak_to_peak or edge_width).
+  - The **Edge Measurement** panel (next to the image) shows:
+    - Current mode and parameter summary.
+    - Core metrics: `peak_height_pos`, `peak_height_neg`, `peak_to_peak`, `area_pos`, `area_neg`, `area_total`, and optional `edge_width`.
+    - For cross‑sections: aggregated mean/median/std/p10/p90 across all valid cross‑sections, and a selector to inspect individual profiles.
+  - The embedded plot displays the intensity profile \(I(s)\) and derivative \(dI/ds\), with peak positions and (if present) 10–90% width markers.
+- Use the **Export CSV** button in the Edge Measurement panel to save results:
+  - Metadata: image filename, timestamp, and the active parameter settings.
+  - **Along line** mode: a single metrics row, plus optional raw profile/derivative samples (one row per sample).
+  - **Cross‑section** modes: one row per cross‑section (center, endpoints, direction, metrics), followed by an aggregate statistics block.
+
 ### Histogram & LUT
 - The histogram shows grayscale distribution of the current image.
 - Drag the **left** (cyan) and **right** (yellow) vertical bars to define a grayscale window.
