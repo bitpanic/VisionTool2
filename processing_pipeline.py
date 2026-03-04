@@ -131,6 +131,46 @@ class ProcessingPipeline(QWidget):
         if image is not None:
             self.original_image = image.copy()
 
+    def run_on_image(self, image, roi=None):
+        """Run the current pipeline on an arbitrary image and return the result.
+
+        This does not modify self.original_image or emit pipeline_updated.
+        It uses the same plugin chain and enable/disable states and respects
+        the given ROI in image coordinates (tuple of 4 ints) if provided.
+        """
+        if image is None:
+            return None
+
+        # If no pipeline, just return a copy of the input image
+        if not self.pipeline:
+            return image.copy()
+
+        use_roi = (
+            isinstance(roi, tuple)
+            and len(roi) == 4
+            and all(isinstance(v, int) for v in roi)
+        )
+
+        # If there is no valid ROI, mimic run_pipeline behavior and
+        # return the original image unprocessed.
+        if not use_roi:
+            return image.copy()
+
+        x, y, w, h = roi
+        roi_image = image[y:y + h, x:x + w].copy()
+        result = roi_image.copy()
+
+        for idx, plugin in enumerate(self.pipeline):
+            item = self.pipeline_list.item(idx)
+            if item is not None and item.checkState() == Qt.Unchecked:
+                continue
+            if result is not None:
+                result = plugin.process(result)
+
+        output = image.copy()
+        output[y:y + h, x:x + w] = result
+        return output
+
     def run_pipeline(self, image=None):
         """Run the pipeline on the input image"""
         # Do not set self.original_image here!

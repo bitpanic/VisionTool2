@@ -29,22 +29,33 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1200, 800)
         self.last_image_path = None
 
-        # Central: image viewer + (parameters + Edge Measurement results) side-by-side
+        # Central: one or two image viewers + (parameters + Edge Measurement results) side-by-side
         self.image_viewer = ImageViewer()
+        self.image_viewer_compare = ImageViewer()
+        self.image_viewer_compare.hide()
+        self.compare_original_image = None
+        self.compare_mode_enabled = False
+        self._syncing_view = False
         self.edge_measure_panel = EdgeMeasurementPanel()
         self.parameter_panel = ParameterPanel()
 
-        right_center_widget = QWidget()
-        right_center_layout = QVBoxLayout(right_center_widget)
+        # Center-right analysis widget (parameters + Edge Measurement summary)
+        self.right_center_widget = QWidget()
+        right_center_layout = QVBoxLayout(self.right_center_widget)
         right_center_layout.setContentsMargins(0, 0, 0, 0)
         right_center_layout.setSpacing(4)
         # Parameters for the selected pipeline step on top, Edge Measurement results below
         right_center_layout.addWidget(self.parameter_panel)
         right_center_layout.addWidget(self.edge_measure_panel)
 
+        # Left side: splitter that can host one or two synchronized viewers
+        self.viewer_splitter = QSplitter(Qt.Horizontal)
+        self.viewer_splitter.addWidget(self.image_viewer)
+        # Do not add compare viewer yet; it is added when compare mode is enabled
+
         center_splitter = QSplitter(Qt.Horizontal)
-        center_splitter.addWidget(self.image_viewer)
-        center_splitter.addWidget(right_center_widget)
+        center_splitter.addWidget(self.viewer_splitter)
+        center_splitter.addWidget(self.right_center_widget)
         center_splitter.setStretchFactor(0, 3)
         center_splitter.setStretchFactor(1, 2)
         self.setCentralWidget(center_splitter)
@@ -110,11 +121,11 @@ class MainWindow(QMainWindow):
         right_layout.setStretch(2, 0)  # color controls
         right_layout.setStretch(3, 1)  # plugin list (Filters/Detectors)
         right_layout.setStretch(4, 3)  # pipeline + parameters
-        right_dock = QDockWidget("", self)
-        right_dock.setWidget(right_widget)
-        right_dock.setAllowedAreas(Qt.RightDockWidgetArea)
-        right_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
-        self.addDockWidget(Qt.RightDockWidgetArea, right_dock)
+        self.right_dock = QDockWidget("", self)
+        self.right_dock.setWidget(right_widget)
+        self.right_dock.setAllowedAreas(Qt.RightDockWidgetArea)
+        self.right_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.right_dock)
 
         # Create menu bar
         self.create_menu_bar()
@@ -122,9 +133,12 @@ class MainWindow(QMainWindow):
         # Connect signals
         self.image_viewer.load_image_requested.connect(self.load_image)
         self.image_viewer.roi_changed.connect(self.roi_manager.set_roi)
+        # Allow ROI edits started from the compare viewer to drive the shared ROI
+        self.image_viewer_compare.roi_changed.connect(self.roi_manager.set_roi)
+        self.image_viewer.view_changed.connect(self.on_view_changed_from_main)
+        self.image_viewer_compare.view_changed.connect(self.on_view_changed_from_compare)
         self.plugin_manager.plugin_selected.connect(self.on_plugin_selected)
-        self.processing_pipeline.pipeline_updated.connect(self.image_viewer.update_image)
-        self.processing_pipeline.pipeline_updated.connect(self.histogram_widget.set_image)
+        self.processing_pipeline.pipeline_updated.connect(self.on_pipeline_updated)
         self.parameter_panel.parameter_changed.connect(self.on_parameter_changed)
         self.processing_pipeline.plugin_selected.connect(self.parameter_panel.set_plugin)
         self.roi_manager.roi_changed.connect(self.on_roi_changed)
@@ -144,6 +158,17 @@ class MainWindow(QMainWindow):
         load_action.setShortcut('Ctrl+O')
         load_action.triggered.connect(self.load_image)
         file_menu.addAction(load_action)
+
+        # Add Load Compare Image action
+        load_compare_action = QAction('Load Compare Image...', self)
+        load_compare_action.setShortcut('Ctrl+Shift+O')
+        load_compare_action.triggered.connect(self.load_compare_image)
+        file_menu.addAction(load_compare_action)
+
+        # Add Clear Compare Image action
+        clear_compare_action = QAction('Clear Compare Image', self)
+        clear_compare_action.triggered.connect(self.clear_compare_image)
+        file_menu.addAction(clear_compare_action)
         
         # Add separator
         file_menu.addSeparator()
@@ -178,6 +203,17 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
+        # Create View menu
+        view_menu = menubar.addMenu('View')
+
+        # Toggle analysis panel (ROI / histogram / plugins / pipeline)
+        self.toggle_analysis_action = QAction('Show Analysis Panel', self)
+        self.toggle_analysis_action.setCheckable(True)
+        self.toggle_analysis_action.setChecked(True)
+        self.toggle_analysis_action.setShortcut('F9')
+        self.toggle_analysis_action.toggled.connect(self.toggle_analysis_panel)
+        view_menu.addAction(self.toggle_analysis_action)
+
     def export_view_with_annotations(self):
         """Export the current viewer pixmap (including ROI and measurements) as an image."""
         pixmap = self.image_viewer.image_label.pixmap()
@@ -193,6 +229,75 @@ class MainWindow(QMainWindow):
 
         if file_name:
             pixmap.save(file_name)
+
+    def set_compare_mode(self, enabled: bool):
+        """Enable or disable dual-image compare mode."""
+        enabled = bool(enabled)
+        if enabled == self.compare_mode_enabled:
+            return
+
+        self.compare_mode_enabled = enabled
+
+        if enabled:
+            if self.image_viewer_compare not in self._iter_splitter_widgets(self.viewer_splitter):
+                self.viewer_splitter.addWidget(self.image_viewer_compare)
+            self.image_viewer_compare.show()
+            # Try to start with the same view as the main viewer
+            self.image_viewer_compare.apply_view_state(self.image_viewer.get_view_state())
+        else:
+            # Remove compare viewer from splitter and clear its state
+            index = self.viewer_splitter.indexOf(self.image_viewer_compare)
+            if index != -1:
+                self.viewer_splitter.widget(index).hide()
+                self.viewer_splitter.removeWidget(self.image_viewer_compare)
+            self.image_viewer_compare.clear_edge_overlay()
+            self.image_viewer_compare.set_roi(None)
+            self.image_viewer_compare.update_image(None) if hasattr(self.image_viewer_compare, "update_image") else None
+            self.compare_original_image = None
+
+    def _iter_splitter_widgets(self, splitter):
+        """Yield all direct child widgets of a QSplitter."""
+        return [splitter.widget(i) for i in range(splitter.count())]
+
+    def load_compare_image(self):
+        """Load an image into the compare viewer and enable compare mode."""
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Compare Image File",
+            "",
+            "Image Files (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)"
+        )
+
+        if not file_name:
+            return
+
+        if self.image_viewer_compare.load_image(file_name):
+            # Remember original compare image for pipeline processing
+            img = self.image_viewer_compare.get_current_image()
+            self.compare_original_image = img.copy() if img is not None else None
+            self.image_viewer_compare.set_image_path(file_name)
+            if not self.compare_mode_enabled:
+                self.set_compare_mode(True)
+            # Apply current ROI to compare viewer if present
+            roi = self.roi_manager.get_roi()
+            if roi:
+                self.image_viewer_compare.set_roi(roi)
+            # If a pipeline result exists, run it on the compare image as well
+            if self.processing_pipeline.original_image is not None and self.compare_original_image is not None:
+                roi_for_processing = self.roi_manager.get_roi()
+                compare_result = self.processing_pipeline.run_on_image(
+                    self.compare_original_image,
+                    roi=roi_for_processing,
+                )
+                if compare_result is not None:
+                    self.image_viewer_compare.update_image(compare_result)
+        else:
+            QMessageBox.warning(self, "Error", f"Failed to load compare image: {file_name}")
+
+    def clear_compare_image(self):
+        """Clear and hide the compare image, disabling compare mode."""
+        self.compare_original_image = None
+        self.set_compare_mode(False)
 
     def load_image(self):
         """Open file dialog to load an image and auto-set ROI"""
@@ -217,11 +322,20 @@ class MainWindow(QMainWindow):
                     roi_x = (w - roi_w) // 2
                     roi_y = (h - roi_h) // 2
                     roi = (roi_x, roi_y, roi_w, roi_h)
+                    # Always update stored ROI values, but only show/apply it
+                    # to the viewers when ROI is currently enabled.
                     self.roi_manager.set_roi(roi)
-                    self.image_viewer.set_roi(roi)
+                    if self.roi_manager.roi_enabled:
+                        self.image_viewer.set_roi(roi)
                 self.save_session()
             else:
                 QMessageBox.warning(self, "Error", f"Failed to load image: {file_name}")
+
+    def toggle_analysis_panel(self, visible: bool):
+        """Show or hide analysis panels (right dock and center-right widgets)."""
+        is_visible = bool(visible)
+        self.right_dock.setVisible(is_visible)
+        self.right_center_widget.setVisible(is_visible)
 
     def on_plugin_selected(self, plugin):
         """Handle plugin selection"""
@@ -270,6 +384,8 @@ class MainWindow(QMainWindow):
     def on_lut_changed(self, low, high):
         """Update viewer LUT from histogram widget."""
         self.image_viewer.set_lut(low, high)
+        if self.compare_mode_enabled and self.compare_original_image is not None:
+            self.image_viewer_compare.set_lut(low, high)
 
     def on_view_mode_changed(self, text):
         """Change viewer color / grayscale / HSV view mode."""
@@ -282,12 +398,16 @@ class MainWindow(QMainWindow):
         }
         mode = mapping.get(text, "rgb")
         self.image_viewer.set_view_mode(mode)
+        if self.compare_mode_enabled and self.compare_original_image is not None:
+            self.image_viewer_compare.set_view_mode(mode)
 
     def on_hsv_scale_changed(self, *args):
         """Update HSV S/V scaling in the viewer."""
         s_scale = float(self.s_scale_spin.value())
         v_scale = float(self.v_scale_spin.value())
         self.image_viewer.set_hsv_scales(s_scale, v_scale)
+        if self.compare_mode_enabled and self.compare_original_image is not None:
+            self.image_viewer_compare.set_hsv_scales(s_scale, v_scale)
 
     def on_roi_changed(self, roi):
         """Handle ROI changes by updating the image viewer.
@@ -299,6 +419,8 @@ class MainWindow(QMainWindow):
         """
         # Update the image viewer ROI
         self.image_viewer.set_roi(roi)
+        if self.compare_mode_enabled and self.compare_original_image is not None:
+            self.image_viewer_compare.set_roi(roi)
         # Force a repaint of the image viewer
         self.image_viewer.repaint()
 
@@ -307,6 +429,46 @@ class MainWindow(QMainWindow):
             self.processing_pipeline.reset_pipeline()
 
         self.save_session()
+
+    def on_pipeline_updated(self, result):
+        """Update viewers and histogram when the pipeline output changes."""
+        if result is not None:
+            self.image_viewer.update_image(result)
+            self.histogram_widget.set_image(result)
+
+        # Also run the same pipeline on the compare image, if available
+        if self.compare_mode_enabled and self.compare_original_image is not None:
+            roi = self.roi_manager.get_roi()
+            compare_result = self.processing_pipeline.run_on_image(
+                self.compare_original_image,
+                roi=roi,
+            )
+            if compare_result is not None:
+                self.image_viewer_compare.update_image(compare_result)
+
+    def on_view_changed_from_main(self, state):
+        """Mirror main viewer's view changes to the compare viewer."""
+        if not self.compare_mode_enabled or self.compare_original_image is None:
+            return
+        if self._syncing_view:
+            return
+        self._syncing_view = True
+        try:
+            self.image_viewer_compare.apply_view_state(state)
+        finally:
+            self._syncing_view = False
+
+    def on_view_changed_from_compare(self, state):
+        """Optionally mirror compare viewer changes back to the main viewer."""
+        if not self.compare_mode_enabled or self.compare_original_image is None:
+            return
+        if self._syncing_view:
+            return
+        self._syncing_view = True
+        try:
+            self.image_viewer.apply_view_state(state)
+        finally:
+            self._syncing_view = False
 
     def save_session(self):
         session = {
@@ -343,7 +505,8 @@ class MainWindow(QMainWindow):
             roi = session.get('roi')
             if roi:
                 self.roi_manager.set_roi(tuple(roi))
-                self.image_viewer.set_roi(tuple(roi))
+                if self.roi_manager.roi_enabled:
+                    self.image_viewer.set_roi(tuple(roi))
             # Restore pipeline
             pipeline = session.get('pipeline', [])
             self.processing_pipeline.clear_pipeline()

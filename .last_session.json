@@ -1,10 +1,20 @@
 {
-  "image_path": "//192.168.2.1/project/#_Evaluations/#Newlight/thired.jpg",
-  "roi": [
-    2071,
-    2092,
-    1023,
-    1098
-  ],
-  "pipeline": []
+  "image_path": "//192.168.2.1/project/#_Evaluations/#Newlight/Compare lights/1_SR.png",
+  "roi": null,
+  "pipeline": [
+    {
+      "name": "Blob Detector",
+      "parameters": {
+        "min_threshold": 10,
+        "max_threshold": 200,
+        "threshold_step": 10,
+        "min_area": 100,
+        "max_area": 5000,
+        "min_circularity": 0.1,
+        "min_convexity": 0.87,
+        "max_convexity": 1.0,
+        "min_inertia_ratio": 0.01
+      }
+    }
+  ]
 }

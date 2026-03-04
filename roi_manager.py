@@ -132,6 +132,8 @@ class ROIManager(QWidget):
 
     def get_roi(self):
         """Get the current ROI"""
+        if not self.roi_enabled:
+            return None
         if self.roi and isinstance(self.roi, tuple) and len(self.roi) == 4:
             return self.roi
         return None

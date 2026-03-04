@@ -68,6 +68,16 @@ python3 main.py
   - Pipeline list (with enable/disable checkboxes).
   - Parameter panel for the selected pipeline step.
 
+### Dual Image Compare Mode
+- **Enable compare mode**: Use **File → Load Compare Image…** to load a second image.
+- When a compare image is loaded, two viewers appear side‑by‑side in the center area.
+- Both viewers:
+  - Share the **same ROI** (from the ROI Manager).
+  - Use the **same processing pipeline and parameters**.
+  - Stay synchronized in **zoom**, **pan**, **view mode** (RGB/Gray/HSV), **LUT**, and **HSV S/V scaling**.
+- The **Edge Measurement** tool continues to operate on the primary (left) viewer; the compare viewer shows the same physical region under identical processing for visual comparison.
+- **Disable compare mode**: Use **File → Clear Compare Image** to hide the second viewer and return to single‑image view.
+
 ### ROI handling
 - **Create ROI**: Hold **Ctrl** and drag in the image.
 - **Move ROI**: Hold **Ctrl** and drag **inside** the existing ROI.

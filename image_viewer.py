@@ -7,6 +7,7 @@ from PyQt5.QtGui import QImage, QPixmap, QCursor, QPainter, QPen, QColor
 class ImageViewer(QWidget):
     load_image_requested = pyqtSignal()
     roi_changed = pyqtSignal(tuple)  # Signal to notify ROI changes
+    view_changed = pyqtSignal(object)  # Emits when zoom / view parameters change
 
     def __init__(self):
         super().__init__()
@@ -38,6 +39,120 @@ class ImageViewer(QWidget):
         self.hsv_v_scale = 1.0
         # Edge measurement overlay (set by analysis plugins)
         self.edge_overlay = None
+        self.image_path = None
+
+    # ------------------------------------------------------------------
+    # View state helpers for synchronization between multiple viewers
+    # ------------------------------------------------------------------
+
+    def _get_view_center_image_coords(self):
+        """Return the current view center in image coordinates, or None."""
+        if self.current_image is None:
+            return None
+
+        scroll_x = self.scroll_area.horizontalScrollBar().value()
+        scroll_y = self.scroll_area.verticalScrollBar().value()
+        view_w = self.scroll_area.viewport().width()
+        view_h = self.scroll_area.viewport().height()
+
+        # Center point in label coordinates
+        center_label_x = scroll_x + view_w / 2.0
+        center_label_y = scroll_y + view_h / 2.0
+
+        # Convert label coords to image coords (similar to map_to_image_coords)
+        margin_x, margin_y = self._get_image_margins()
+        rel_x = center_label_x - margin_x
+        rel_y = center_label_y - margin_y
+
+        if self.scale_factor <= 0:
+            return None
+
+        img_x = rel_x / self.scale_factor
+        img_y = rel_y / self.scale_factor
+
+        h, w = self.current_image.shape[:2]
+        if 0 <= img_x < w and 0 <= img_y < h:
+            return (float(img_x), float(img_y))
+        return None
+
+    def _set_view_center_from_image_coords(self, img_x, img_y):
+        """Center the view on the given image coordinates."""
+        if self.current_image is None or self.scale_factor <= 0:
+            return
+
+        h, w = self.current_image.shape[:2]
+        img_x = max(0.0, min(float(img_x), float(w)))
+        img_y = max(0.0, min(float(img_y), float(h)))
+
+        margin_x, margin_y = self._get_image_margins()
+        center_label_x = img_x * self.scale_factor + margin_x
+        center_label_y = img_y * self.scale_factor + margin_y
+
+        view_w = self.scroll_area.viewport().width()
+        view_h = self.scroll_area.viewport().height()
+
+        scroll_x = self.scroll_area.horizontalScrollBar()
+        scroll_y = self.scroll_area.verticalScrollBar()
+
+        scroll_x.setValue(int(center_label_x - view_w / 2.0))
+        scroll_y.setValue(int(center_label_y - view_h / 2.0))
+
+    def get_view_state(self):
+        """Return a dict describing the current view state for sync."""
+        center = self._get_view_center_image_coords()
+        center_x = center[0] if center is not None else None
+        center_y = center[1] if center is not None else None
+
+        return {
+            "scale_factor": float(self.scale_factor),
+            "pixel_size": float(self.pixel_size),
+            "pixel_unit": str(self.pixel_unit),
+            "view_mode": str(self.view_mode),
+            "lut_enabled": bool(self.lut_enabled),
+            "lut_low": int(self.lut_low),
+            "lut_high": int(self.lut_high),
+            "hsv_s_scale": float(self.hsv_s_scale),
+            "hsv_v_scale": float(self.hsv_v_scale),
+            "center_x": center_x,
+            "center_y": center_y,
+        }
+
+    def apply_view_state(self, state):
+        """Apply a previously captured view state and redraw."""
+        if not isinstance(state, dict):
+            return
+
+        self.scale_factor = float(state.get("scale_factor", self.scale_factor))
+        self.pixel_size = float(state.get("pixel_size", self.pixel_size))
+        self.pixel_unit = str(state.get("pixel_unit", self.pixel_unit))
+        self.view_mode = str(state.get("view_mode", self.view_mode))
+        self.lut_enabled = bool(state.get("lut_enabled", self.lut_enabled))
+        self.lut_low = int(state.get("lut_low", self.lut_low))
+        self.lut_high = int(state.get("lut_high", self.lut_high))
+        self.hsv_s_scale = float(state.get("hsv_s_scale", self.hsv_s_scale))
+        self.hsv_v_scale = float(state.get("hsv_v_scale", self.hsv_v_scale))
+
+        # Update calibration widgets if present
+        try:
+            self.pixel_size_spin.blockSignals(True)
+            self.pixel_size_spin.setValue(self.pixel_size)
+            self.pixel_size_spin.blockSignals(False)
+            if self.pixel_unit in [self.unit_combo.itemText(i) for i in range(self.unit_combo.count())]:
+                self.unit_combo.blockSignals(True)
+                self.unit_combo.setCurrentText(self.pixel_unit)
+                self.unit_combo.blockSignals(False)
+        except Exception:
+            # Fallback silently if widgets are not yet available
+            pass
+
+        if self.current_image is not None:
+            self.display_image(self.current_image)
+
+            center_x = state.get("center_x")
+            center_y = state.get("center_y")
+            if center_x is not None and center_y is not None:
+                self._set_view_center_from_image_coords(center_x, center_y)
+        # Do not emit view_changed here to avoid feedback loops
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -109,6 +224,12 @@ class ImageViewer(QWidget):
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
         self.scroll_area.setWidget(self.image_label)
+
+        # Small label for image path (file the image was loaded from)
+        self.path_label = QLabel("")
+        self.path_label.setAlignment(Qt.AlignLeft)
+        self.path_label.setStyleSheet("color: gray; font-size: 9px;")
+        layout.addWidget(self.path_label)
         
         # Enable mouse tracking for pan and ROI
         self.image_label.setMouseTracking(True)
@@ -122,11 +243,19 @@ class ImageViewer(QWidget):
         self.current_image = cv2.imread(image_path)
         if self.current_image is not None:
             # Remember image path for analysis/export tools
-            self.image_path = image_path
+            self.set_image_path(image_path)
             self.display_image(self.current_image)
             self.zoom_to_fit()
             return True
         return False
+
+    def set_image_path(self, image_path):
+        """Set the logical source path for this viewer's image."""
+        self.image_path = image_path
+        if not image_path:
+            self.path_label.setText("")
+        else:
+            self.path_label.setText(str(image_path))
 
     def get_handle_rect(self, x, y, w, h, handle):
         """Get the rectangle for a resize handle"""
@@ -270,12 +399,14 @@ class ImageViewer(QWidget):
         self.lut_enabled = True
         if self.current_image is not None:
             self.display_image(self.current_image)
+        self.view_changed.emit(self.get_view_state())
 
     def set_view_mode(self, mode):
         """Set how the image is visualized: rgb / gray / h / s / v."""
         self.view_mode = mode
         if self.current_image is not None:
             self.display_image(self.current_image)
+        self.view_changed.emit(self.get_view_state())
 
     def set_hsv_scales(self, s_scale, v_scale):
         """Set scaling factors for HSV saturation and value."""
@@ -283,6 +414,7 @@ class ImageViewer(QWidget):
         self.hsv_v_scale = max(0.0, float(v_scale))
         if self.current_image is not None:
             self.display_image(self.current_image)
+        self.view_changed.emit(self.get_view_state())
 
     def export_current_image(self):
         """Export the current processed image (with LUT, without overlays)."""
@@ -589,7 +721,7 @@ class ImageViewer(QWidget):
         """Zoom the image by the given factor"""
         if self.current_image is None:
             return
-            
+
         old_factor = self.scale_factor
         self.scale_factor *= factor
         
@@ -615,6 +747,8 @@ class ImageViewer(QWidget):
             # Adjust scroll position to keep the point under cursor fixed
             scroll_x.setValue(int(new_x - pos.x() + scroll_x.value()))
             scroll_y.setValue(int(new_y - pos.y() + scroll_y.value()))
+        # Notify listeners that the view has changed
+        self.view_changed.emit(self.get_view_state())
 
     def zoom_to_fit(self):
         """Zoom to fit the window"""
@@ -630,6 +764,7 @@ class ImageViewer(QWidget):
         
         self.scale_factor = min(scale_x, scale_y)
         self.display_image(self.current_image)
+        self.view_changed.emit(self.get_view_state())
 
     def zoom_to_roi(self):
         """Zoom to the current ROI"""
@@ -651,6 +786,7 @@ class ImageViewer(QWidget):
         
         scroll_x.setValue(int(x * self.scale_factor - (view_size.width() - width * self.scale_factor) / 2))
         scroll_y.setValue(int(y * self.scale_factor - (view_size.height() - height * self.scale_factor) / 2))
+        self.view_changed.emit(self.get_view_state())
 
     def mousePressEvent(self, event):
         """Handle mouse press for panning, ROI resizing, and measurements"""
@@ -827,13 +963,16 @@ class ImageViewer(QWidget):
             # Calculate movement
             delta = event.pos() - self.last_pos
             self.last_pos = event.pos()
-            
+
             # Update scroll bars
             scroll_x = self.scroll_area.horizontalScrollBar()
             scroll_y = self.scroll_area.verticalScrollBar()
-            
+
             scroll_x.setValue(scroll_x.value() - delta.x())
             scroll_y.setValue(scroll_y.value() - delta.y())
+
+            # Notify listeners that the view (pan) has changed
+            self.view_changed.emit(self.get_view_state())
 
     def set_measure_mode(self, enabled):
         """Enable or disable measurement mode."""
